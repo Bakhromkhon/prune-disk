@@ -13,7 +13,7 @@ name = "prune"
 path = "src/main.rs"
 
 [dependencies]
-prune-core = { path = "../prune-core" }
+prune-core = { version = "0.1.0", path = "../prune-core" }
 anyhow.workspace = true
 clap.workspace = true
 crossterm.workspace = true
