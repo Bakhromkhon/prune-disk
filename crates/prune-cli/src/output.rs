@@ -13,12 +13,20 @@ pub fn print_report(report: &ScanReport) {
     );
     println!(
         "Status: {} · Logical size is not a promise of reclaimable space.",
-        if report.partial {
+        if report.cancelled {
+            "cancelled (partial; exit code 130)"
+        } else if report.partial {
             "partial"
         } else {
             "complete for selected rules"
         }
     );
+    if report.suppressed_errors > 0 {
+        println!(
+            "Additional warnings suppressed: {}",
+            report.suppressed_errors
+        );
+    }
     if !report.errors.is_empty() {
         println!("Warnings: {}", report.errors.len());
         for error in &report.errors {

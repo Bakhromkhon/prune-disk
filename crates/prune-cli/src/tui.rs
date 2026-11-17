@@ -244,18 +244,26 @@ impl<'a> App<'a> {
 
     fn draw_header(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         let title = format!(" Prune {} ", env!("CARGO_PKG_VERSION"));
+        let status = if self.report.cancelled {
+            "cancelled"
+        } else if self.report.partial {
+            "partial"
+        } else {
+            "complete"
+        };
         let summary = format!(
-            " read-only scan · {} findings · logical size: {} · {} warnings (w) ",
+            " {status} · {} findings · logical size: {} · {} warnings + {} suppressed (w) ",
             self.report.findings.len(),
             format_size(self.report.total_bytes, DECIMAL),
-            self.report.errors.len()
+            self.report.errors.len(),
+            self.report.suppressed_errors
         );
         let line = if area.width < 90 {
             Line::from(format!(
-                "{} findings · {} logical · {} warnings (w)",
+                "{status} · {} findings · {} warnings + {} suppressed (w)",
                 self.report.findings.len(),
-                format_size(self.report.total_bytes, DECIMAL),
-                self.report.errors.len()
+                self.report.errors.len(),
+                self.report.suppressed_errors
             ))
         } else {
             Line::from(vec![
@@ -349,7 +357,7 @@ impl<'a> App<'a> {
 
     fn draw_details(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
         if self.show_warnings {
-            let lines = if self.report.errors.is_empty() {
+            let mut lines = if self.report.errors.is_empty() {
                 vec![Line::from("No scan warnings.")]
             } else {
                 self.report
@@ -364,6 +372,12 @@ impl<'a> App<'a> {
                     })
                     .collect()
             };
+            if self.report.suppressed_errors > 0 {
+                lines.push(Line::from(format!(
+                    "Additional warnings suppressed: {}",
+                    self.report.suppressed_errors
+                )));
+            }
             let paragraph = Paragraph::new(lines)
                 .block(
                     Block::default()
@@ -487,6 +501,8 @@ mod tests {
         serde_json::from_value(json!({
             "schema_version": 1, "platform": "test", "scanned_at": 0,
             "total_bytes": 30, "total_files": 2,
+            "byte_accounting": "logical", "partial": true,
+            "cancelled": false, "suppressed_errors": 0,
             "findings": [
                 {
                     "rule_id": "a", "rule_name": "alpha",
@@ -527,6 +543,22 @@ mod tests {
         assert!(!app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)));
         assert!(!app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT)));
         assert!(app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+    }
+
+    #[test]
+    fn cancelled_status_and_suppressed_errors_are_visible() {
+        let mut report = report();
+        report.cancelled = true;
+        report.partial = true;
+        report.suppressed_errors = 123;
+        let mut app = App::new(&report);
+        for width in [80, 160] {
+            let screen = render(&mut app, width, 24);
+            assert!(screen.contains("cancelled"));
+            assert!(screen.contains("123 suppressed"));
+        }
+        app.show_warnings = true;
+        assert!(render(&mut app, 100, 24).contains("Additional warnings suppressed: 123"));
     }
 
     #[test]

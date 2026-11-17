@@ -1,4 +1,5 @@
 mod output;
+mod scan_ui;
 mod size;
 mod tui;
 mod util;
@@ -6,7 +7,8 @@ mod util;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use prune_core::{
-    Category, Risk, Rule, ScanOptions, ValidatedRuleSet, builtin_rules, load_rules_from_dir, scan,
+    Category, Risk, Rule, ScanControl, ScanOptions, ValidatedRuleSet, builtin_rules,
+    load_rules_from_dir, scan_with_control,
 };
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -26,6 +28,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Scan for cleanup candidates (read-only)
+    #[command(
+        after_help = "With terminal stdin and stderr, q/Esc/Ctrl+C cancels cooperatively: the partial report is printed before exit code 130. In-flight filesystem calls must finish first.\nJSON and noninteractive scans have no progress or key handling; Ctrl+C uses the operating system's default signal behavior and may terminate without a report."
+    )]
     Scan(ScanArgs),
     /// List or validate rules
     Rules(RulesArgs),
@@ -35,6 +40,9 @@ enum Commands {
 
 #[derive(clap::Args)]
 struct ScanArgs {
+    /// Maximum scan workers (1..=16)
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=16))]
+    workers: u8,
     /// Output JSON instead of a table or TUI
     #[arg(long)]
     json: bool,
@@ -124,13 +132,16 @@ enum RulesCommand {
 }
 
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("error: {}", util::escape_terminal(&format!("{error:#}")));
-        std::process::exit(1);
+    match run() {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("error: {}", util::escape_terminal(&format!("{error:#}")));
+            std::process::exit(1);
+        }
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<i32> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -144,12 +155,12 @@ fn run() -> Result<()> {
     };
     match cli.command {
         Commands::Scan(args) => run_scan(args),
-        Commands::Rules(args) => run_rules(args),
-        Commands::Doctor => run_doctor(),
+        Commands::Rules(args) => run_rules(args).map(|()| 0),
+        Commands::Doctor => run_doctor().map(|()| 0),
     }
 }
 
-fn run_scan(args: ScanArgs) -> Result<()> {
+fn run_scan(args: ScanArgs) -> Result<i32> {
     let rules = load_rules(args.rules_dir.as_deref())?;
     let options = ScanOptions {
         os: std::env::consts::OS.to_string(),
@@ -162,20 +173,27 @@ fn run_scan(args: ScanArgs) -> Result<()> {
         max_risk: args.max_risk.map(Into::into),
     };
 
-    let report = scan(&options);
+    let control = ScanControl::default().with_worker_count(usize::from(args.workers));
+    let report = if !args.json && io::stderr().is_terminal() && io::stdin().is_terminal() {
+        scan_ui::run(&options, &control)?
+    } else {
+        scan_with_control(&options, &control, |_| {})
+    };
+    let exit_code = if report.cancelled { 130 } else { 0 };
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
+        return Ok(exit_code);
     }
 
-    if !args.no_tui && io::stdout().is_terminal() && io::stdin().is_terminal() {
+    if !report.cancelled && !args.no_tui && io::stdout().is_terminal() && io::stdin().is_terminal()
+    {
         tui::run(&report)?;
     } else {
         output::print_report(&report);
     }
 
-    Ok(())
+    Ok(exit_code)
 }
 
 fn run_rules(args: RulesArgs) -> Result<()> {

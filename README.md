@@ -67,6 +67,7 @@ prune scan --json              # machine-readable report
 prune scan --min-size 100MB    # ignore smaller findings
 prune scan --category developer
 prune scan --max-risk safe     # only safe findings
+prune scan --workers 2         # measurement workers, accepted range 1–16
 prune rules list
 prune rules validate
 prune rules list --json
@@ -80,6 +81,11 @@ prune scan --rules-dir ./my-rules
 ```
 
 Every custom rule is validated before it is used. In v0.1, rule paths must be inside your home directory and specific; broad roots and `..` traversal are rejected.
+
+Interactive scans show progress on stderr; press `q`, Esc or Ctrl+C to cancel.
+Cancellation prints a partial report and exits with status 130. JSON and
+noninteractive scans do not show progress; OS signal termination in these modes
+does not guarantee a final report. See [scanning limits](docs/scanning.md).
 
 ## Safety guarantees
 

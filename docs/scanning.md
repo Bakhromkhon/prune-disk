@@ -44,6 +44,17 @@ The next scalability step is a bounded discovery/reconciliation design that
 preserves filesystem identity and conservative risk handling without retaining
 an unbounded set of open handles.
 
+## CLI adapter
+
+`prune scan --workers N` accepts 1–16 (default 2). Interactive progress requires
+both stdin and stderr to be terminals and is disabled for `--json`. Progress goes
+to stderr through a bounded channel; stdout remains reserved for the report.
+`q`, Esc and Ctrl+C request cooperative cancellation. The adapter joins the worker
+before printing the partial report and returning exit status 130.
+
+JSON/noninteractive scans do not install an interactive keyboard handler.
+Ctrl+C in these modes retains OS behavior and need not produce a final report.
+
 ## Portability
 
 Rule paths use `/` separators on every OS. Native Windows backslashes are

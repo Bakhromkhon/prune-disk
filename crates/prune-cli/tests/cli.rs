@@ -66,14 +66,61 @@ fn scans_a_fixture_and_returns_json() {
             rules_dir.to_str().expect("utf-8 rules dir"),
             "--json",
             "--no-tui",
+            "--workers",
+            "1",
         ])
         .assert()
         .success()
         .get_output()
-        .stdout
-        .clone();
+        .to_owned();
+    assert!(output.stderr.is_empty(), "JSON scan must not emit progress");
+    assert!(!output.stdout.contains(&0x1b));
+    let output = output.stdout.clone();
 
     let json: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
     assert_eq!(json["findings"][0]["size_bytes"], 5);
     assert_eq!(json["findings"][0]["file_count"], 1);
+    assert_eq!(json["cancelled"], false);
+    assert_eq!(json["suppressed_errors"], 0);
+
+    let human = Command::cargo_bin("prune")
+        .expect("prune binary")
+        .args([
+            "scan",
+            "--rules-dir",
+            rules_dir.to_str().expect("utf-8 rules dir"),
+            "--workers",
+            "16",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .to_owned();
+    assert!(human.stderr.is_empty());
+    assert!(!human.stdout.contains(&0x1b));
+    assert!(String::from_utf8(human.stdout).unwrap().contains("Fixture"));
+}
+
+#[test]
+fn rejects_workers_outside_bounded_range() {
+    for workers in ["0", "17", "256", "-1", "two"] {
+        Command::cargo_bin("prune")
+            .expect("prune binary")
+            .args(["scan", "--workers", workers, "--json"])
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty());
+    }
+}
+
+#[test]
+fn scan_help_documents_cancellation_exit_and_noninteractive_limits() {
+    Command::cargo_bin("prune")
+        .expect("prune binary")
+        .args(["scan", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("exit code 130"))
+        .stdout(predicate::str::contains("default signal behavior"))
+        .stdout(predicate::str::contains("--workers"));
 }
