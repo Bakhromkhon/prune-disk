@@ -33,16 +33,29 @@ is the authoritative result.
 - Default two measurement workers; accepted worker count is clamped to 1–16.
 - Each scan uses its own worker pool rather than configuring global Rayon state.
 - Diagnostics are capped; `suppressed_errors` records omitted diagnostics.
-- Identity handles are bounded. Exceeding the budget rejects discovery rather
-  than weakening alias/risk checks. This can exclude otherwise legitimate scans.
-- Candidate and traversal collections are not yet comprehensively memory-bounded.
+- Unix identity reconciliation uses device/inode/type snapshots without holding
+  one open descriptor per candidate. Observed identities are checked again.
+- Windows uses bounded simultaneous identity handles rather than retaining all
+  candidates' handles. Its pairwise comparison can cost O(n² × depth); native
+  Windows execution must still be checked in CI.
+- Discovery collects at most 10,000 candidates, including duplicate aliases
+  before reconciliation. Exceeding this budget discards discovery and returns a
+  partial report rather than weakening risk checks. Library callers can lower
+  the limit with `ScanControl::with_candidate_limit`.
+- Candidate count is bounded, but path lengths and traversal stacks are not
+  comprehensively memory-bounded.
 - Multiple independent callers can still start multiple scans: a process-wide
   application concurrency policy is future work.
 
 These limits do not claim suitability for arbitrary millions-of-files inputs.
-The next scalability step is a bounded discovery/reconciliation design that
-preserves filesystem identity and conservative risk handling without retaining
-an unbounded set of open handles.
+This does not remove TOCTOU windows or establish a globally atomic filesystem
+snapshot. Further scalability work includes traversal budgets and faster Windows
+identity indexing without weaker identity checks.
+
+Unix identity lookup count is linear in candidates times path depth, but current
+link-policy checks revisit ancestors for each identity. Total metadata operations
+can therefore grow as O(candidates × depth²). The 2,000-candidate stress fixture
+does not establish performance on arbitrarily deep directory trees.
 
 ## CLI adapter
 

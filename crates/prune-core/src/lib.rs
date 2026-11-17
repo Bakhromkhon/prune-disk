@@ -10,7 +10,7 @@ pub mod rules;
 pub mod scan;
 
 pub use control::{
-    MAX_IDENTITY_HANDLES, MAX_SCAN_ERRORS, MAX_SCAN_WORKERS, ScanControl, ScanProgress, ScanStage,
+    MAX_SCAN_CANDIDATES, MAX_SCAN_ERRORS, MAX_SCAN_WORKERS, ScanControl, ScanProgress, ScanStage,
 };
 pub use model::{ByteAccounting, Category, Finding, Recreate, Risk, Rule, ScanError, ScanReport};
 pub use rules::{

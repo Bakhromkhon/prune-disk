@@ -94,7 +94,7 @@ pub(crate) fn parse_path_pattern(pattern: &str, root: &Path) -> Result<Validated
     })
 }
 
-fn forbidden_metadata(metadata: &fs::Metadata) -> bool {
+pub(crate) fn forbidden_metadata(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
     }
@@ -144,7 +144,8 @@ pub(crate) fn canonical_candidate(path: &Path, root: &Path) -> io::Result<PathBu
 
 /// Obtain an identity only for regular files/directories, never special files
 /// such as FIFOs. Handles stay alive while compared (required on Windows).
-pub(crate) fn checked_identity(path: &Path) -> io::Result<same_file::Handle> {
+#[cfg(any(test, not(unix)))]
+pub(crate) fn checked_handle(path: &Path) -> io::Result<same_file::Handle> {
     let metadata = checked_metadata(path)?;
     if !metadata.is_file() && !metadata.is_dir() {
         return Err(io::Error::other("special file rejected"));
@@ -152,6 +153,34 @@ pub(crate) fn checked_identity(path: &Path) -> io::Result<same_file::Handle> {
     let identity = same_file::Handle::from_path(path)?;
     checked_metadata(path)?;
     Ok(identity)
+}
+
+#[cfg(not(unix))]
+pub(crate) use checked_handle as checked_identity;
+
+/// Closed stat identity: no file descriptors are retained. Type participates in
+/// equality so replacement with another kind cannot be mistaken for an alias.
+/// Inode reuse and changes between checks remain possible (not a sandbox).
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Identity {
+    device: u64,
+    inode: u64,
+    directory: bool,
+}
+
+#[cfg(unix)]
+pub(crate) fn checked_identity(path: &Path) -> io::Result<Identity> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = checked_metadata(path)?;
+    if !metadata.is_file() && !metadata.is_dir() {
+        return Err(io::Error::other("special file rejected"));
+    }
+    Ok(Identity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        directory: metadata.is_dir(),
+    })
 }
 
 #[cfg(test)]

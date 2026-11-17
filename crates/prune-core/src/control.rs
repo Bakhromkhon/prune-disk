@@ -9,14 +9,16 @@ use std::time::{Duration, Instant};
 
 pub const MAX_SCAN_WORKERS: usize = 16;
 pub const MAX_SCAN_ERRORS: usize = 256;
-/// Includes the trusted-root handle and transient ancestor identity handles.
-pub const MAX_IDENTITY_HANDLES: usize = 128;
+/// Bounds collected discovery candidates, including aliases, before filtering.
+/// This is not a bound on traversal entries or path lengths.
+pub const MAX_SCAN_CANDIDATES: usize = 10_000;
 
 #[derive(Debug, Clone)]
 /// Clones share a one-way cancellation token; worker limits are per value.
 pub struct ScanControl {
     cancelled: Arc<AtomicBool>,
     workers: usize,
+    candidates: usize,
 }
 
 impl Default for ScanControl {
@@ -24,11 +26,21 @@ impl Default for ScanControl {
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
             workers: 2,
+            candidates: MAX_SCAN_CANDIDATES,
         }
     }
 }
 
 impl ScanControl {
+    /// Lower the discovery memory budget (clamped to 1..=MAX_SCAN_CANDIDATES).
+    /// Overflow discards the entire discovery pass and reports a partial scan.
+    pub fn with_candidate_limit(mut self, candidates: usize) -> Self {
+        self.candidates = candidates.clamp(1, MAX_SCAN_CANDIDATES);
+        self
+    }
+    pub fn candidate_limit(&self) -> usize {
+        self.candidates
+    }
     /// Clamp the per-scan worker limit to 1..=MAX_SCAN_WORKERS.
     pub fn with_worker_count(mut self, workers: usize) -> Self {
         self.workers = workers.clamp(1, MAX_SCAN_WORKERS);
@@ -122,6 +134,28 @@ impl<'a> Progress<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_budget_is_bounded_and_clones_keep_their_limit() {
+        assert_eq!(
+            ScanControl::default().candidate_limit(),
+            MAX_SCAN_CANDIDATES
+        );
+        assert_eq!(
+            ScanControl::default()
+                .with_candidate_limit(0)
+                .candidate_limit(),
+            1
+        );
+        assert_eq!(
+            ScanControl::default()
+                .with_candidate_limit(usize::MAX)
+                .candidate_limit(),
+            MAX_SCAN_CANDIDATES
+        );
+        let control = ScanControl::default().with_candidate_limit(2000);
+        assert_eq!(control.clone().candidate_limit(), 2000);
+    }
 
     #[test]
     fn progress_throttles_bursts_but_keeps_exact_final_counters() {

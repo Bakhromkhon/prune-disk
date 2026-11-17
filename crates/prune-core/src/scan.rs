@@ -273,16 +273,17 @@ mod tests {
     }
 
     #[test]
-    fn identity_handle_limit_discards_entire_discovery_fail_closed() {
+    fn candidate_limit_discards_entire_discovery_fail_closed() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("app/cache")).unwrap();
-        for i in 0..crate::MAX_IDENTITY_HANDLES + 1 {
+        for i in 0..17 {
             fs::write(dir.path().join(format!("app/cache/{i}")), b"x").unwrap();
         }
-        let report = scan(&options(
-            dir.path(),
-            vec![rule("cache", "~/app/cache/*", Risk::Safe)],
-        ));
+        let report = scan_with_control(
+            &options(dir.path(), vec![rule("cache", "~/app/cache/*", Risk::Safe)]),
+            &ScanControl::default().with_candidate_limit(16),
+            |_| {},
+        );
         assert!(report.partial);
         assert!(!report.cancelled);
         assert!(report.findings.is_empty());
@@ -290,8 +291,51 @@ mod tests {
             report
                 .errors
                 .iter()
-                .any(|error| error.message.contains("identity handle limit"))
+                .any(|error| error.message.contains("candidate limit"))
         );
+    }
+
+    #[test]
+    fn two_thousand_disjoint_candidates_do_not_retain_identity_handles() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/cache")).unwrap();
+        for i in 0..2_000 {
+            let candidate = dir.path().join(format!("app/cache/{i}"));
+            fs::create_dir(&candidate).unwrap();
+            fs::write(candidate.join("file"), b"x").unwrap();
+        }
+        let report = scan(&options(
+            dir.path(),
+            vec![rule("cache", "~/app/cache/*", Risk::Safe)],
+        ));
+        assert!(!report.partial, "{:?}", report.errors);
+        assert_eq!(report.findings.len(), 2_000);
+        assert_eq!(report.total_files, 2_000);
+        assert_eq!(report.total_bytes, 2_000);
+    }
+
+    #[test]
+    fn failed_never_descendant_expansion_cannot_leave_a_safe_parent() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/cache")).unwrap();
+        fs::write(dir.path().join("app/cache/local"), b"x").unwrap();
+        for rules in [
+            vec![
+                rule("parent", "~/app/cache", Risk::Safe),
+                rule("never", "~/app/cache/local/*", Risk::Never),
+            ],
+            vec![
+                rule("never", "~/app/cache/local/*", Risk::Never),
+                rule("parent", "~/app/cache", Risk::Safe),
+            ],
+        ] {
+            let mut opts = options(dir.path(), rules);
+            opts.max_risk = Some(Risk::Safe);
+            let report = scan(&opts);
+            assert!(report.partial);
+            assert!(report.findings.is_empty());
+            assert!(!report.errors.is_empty());
+        }
     }
 
     #[cfg(unix)]
@@ -442,6 +486,39 @@ mod tests {
         assert_eq!(report.total_bytes, 8);
         assert_eq!(report.total_files, 2);
         assert_eq!(report.byte_accounting, ByteAccounting::Logical);
+    }
+
+    #[test]
+    fn hardlinked_candidate_aliases_merge_metadata_but_disjoint_directories_stay_logical() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/a")).unwrap();
+        fs::create_dir_all(dir.path().join("app/b")).unwrap();
+        fs::write(dir.path().join("app/a/file"), b"1234").unwrap();
+        fs::hard_link(dir.path().join("app/a/file"), dir.path().join("app/b/file")).unwrap();
+        let mut safe = rule("safe", "~/app/a/file", Risk::Safe);
+        let mut never = rule("never", "~/app/b/file", Risk::Never);
+        never.recreate = Recreate::Manual;
+        for rules in [
+            vec![safe.clone(), never.clone()],
+            vec![never.clone(), safe.clone()],
+        ] {
+            let mut opts = options(dir.path(), rules);
+            let report = scan(&opts);
+            assert!(!report.partial, "{:?}", report.errors);
+            assert_eq!(report.findings.len(), 1);
+            assert_eq!(report.total_bytes, 4);
+            assert_eq!(report.findings[0].risk, Risk::Never);
+            assert_eq!(report.findings[0].recreate, Recreate::Unknown);
+            opts.max_risk = Some(Risk::Safe);
+            assert!(scan(&opts).findings.is_empty());
+        }
+        safe.paths = vec!["~/app/a".into()];
+        never.paths = vec!["~/app/b".into()];
+        let report = scan(&options(dir.path(), vec![safe, never]));
+        assert!(!report.partial, "{:?}", report.errors);
+        assert_eq!(report.findings.len(), 2);
+        assert_eq!(report.total_bytes, 8);
+        assert_eq!(report.total_files, 2);
     }
 
     fn case_insensitive_fixture() -> Option<tempfile::TempDir> {
