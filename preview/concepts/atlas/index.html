@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>Prune — ATLAS</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="../../report.js"></script>
+  <script defer src="demo.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#results-title">К списку записей</a>
+  <header class="topbar">
+    <div class="identity"><strong>prune<span aria-hidden="true">/</span></strong><span class="edition">ATLAS · просмотр отчёта</span></div>
+    <div class="source"><span id="source-label">Вымышленное демо</span><button id="demo-button" type="button" hidden>Вернуть демо</button></div>
+    <button id="open-button" class="primary" type="button">Открыть отчёт <span aria-hidden="true">↗</span></button>
+    <input id="file-input" type="file" accept=".json,application/json" hidden>
+  </header>
+  <p id="import-status" class="import-status" role="status" hidden></p>
+  <main class="workbench">
+    <aside class="sidebar" aria-label="Категории отчёта">
+      <div class="sidebar-heading"><span class="eyebrow">Состав отчёта</span><span aria-hidden="true">01—</span></div>
+      <nav id="categories" aria-label="Выбрать категорию"></nav>
+      <div class="sidebar-bottom">
+        <p class="eyebrow">Источник данных</p>
+        <p id="source-note">Вымышленные пути и размеры.<br>Это не данные вашего Mac.</p>
+        <dl class="source-meta"><dt>Платформа</dt><dd id="platform"></dd><dt>Дата отчёта</dt><dd id="scan-date"></dd></dl>
+        <p class="local-note">Отчёт остаётся в этой вкладке.<br>Никакой отправки в сеть.</p>
+      </div>
+    </aside>
+    <section class="workspace" aria-label="Обзор и записи">
+      <section class="overview" aria-labelledby="overview-title">
+        <div class="overview-heading"><h1 id="overview-title">Объём в отчёте</h1><span id="report-state" class="state"></span></div>
+        <div id="total" class="total"></div>
+        <p id="total-context" class="total-context"></p>
+        <div class="ribbon-heading"><span>Доли категорий</span><span>Не ёмкость диска</span></div>
+        <div id="ribbon" class="ribbon" aria-label="Состав объёма отчёта"></div>
+        <div class="ribbon-foot"><span id="dominant-category"></span><span>Нажмите долю → категория</span></div>
+        <p id="safety-note" class="safety-note"></p>
+        <details id="report-errors" hidden><summary id="error-summary"></summary><ul id="error-list"></ul></details>
+      </section>
+      <section class="results" aria-labelledby="results-title">
+        <div class="list-heading"><h2 id="results-title" tabindex="-1">Все категории</h2><span id="result-count" role="status"></span></div>
+        <div class="filters">
+          <label class="search-label"><span class="sr-only">Поиск по пути, названию и описанию</span><input id="search" type="search" placeholder="Найти путь или название…" autocomplete="off"></label>
+          <label><span class="sr-only">Уровень риска</span><select id="risk"><option value="">Любой риск</option></select></label>
+          <label><span class="sr-only">Сортировка</span><select id="sort"><option value="size">Сначала крупные</option><option value="name">По названию</option><option value="risk">По риску ↓</option></select></label>
+        </div>
+        <div class="column-head" aria-hidden="true"><span>Запись / путь</span><span>Размер</span></div>
+        <div id="findings" class="findings" role="group" aria-label="Записи отчёта"></div>
+        <div id="empty" class="empty" hidden><p>Нет подходящих записей.</p><button id="clear-filters" type="button">Сбросить все фильтры</button></div>
+      </section>
+      <footer class="workspace-footer"><span>Только просмотр</span><span>Без сканирования и удаления</span></footer>
+    </section>
+    <aside id="inspector" class="inspector" aria-labelledby="inspector-title" tabindex="-1">
+      <div class="inspector-heading"><span class="eyebrow">О выбранной записи</span><span aria-hidden="true">↙</span></div>
+      <div id="inspector-content"></div>
+      <a class="back-to-list" href="#results-title">↑ Вернуться к списку</a>
+      <div class="inspector-bottom"><span class="eyebrow">Прежде чем решать</span><p>Размер — не рекомендация к удалению. Проверьте назначение файлов и возможность их восстановления.</p></div>
+    </aside>
+  </main>
+  <noscript>Для локального просмотра отчёта нужен JavaScript. Сканирование и удаление здесь недоступны.</noscript>
+</body>
+</html>

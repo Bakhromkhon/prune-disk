@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Prune — FOCUS / Где находится объём</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="../../report.js" defer></script>
+  <script src="model.js" defer></script>
+  <script src="demo.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#locations">К списку мест</a>
+  <header class="topbar">
+    <a class="wordmark" href="./" aria-label="Prune, начало"><span class="mark" aria-hidden="true">p.</span> prune <span class="edition">/ focus</span></a>
+    <span class="top-caption">Файлы, в контексте.</span>
+    <div class="top-actions"><button id="demo-button" type="button">Демо</button><button class="import-button" id="import-button" type="button">Открыть отчёт <span aria-hidden="true">↗</span></button><input id="file-input" type="file" accept=".json,application/json" hidden></div>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="title">
+      <div class="eyebrow"><span>ОБЗОР ОТЧЁТА</span><span id="source" class="source">ДЕМО · ВЫМЫШЛЕННЫЕ ДАННЫЕ</span></div>
+      <h1 id="title">Где находится объём<span class="accent">.</span></h1>
+      <p class="deck">Сначала понять, что занимает место. Потом решать.</p>
+      <p class="summary" id="summary" aria-live="polite"></p>
+      <p class="report-meta" id="report-meta"></p>
+      <div id="warning" class="warning" role="status" hidden></div>
+      <p id="import-status" class="import-status" role="status"></p>
+    </section>
+    <div class="workspace">
+      <section class="locations" id="locations" aria-labelledby="locations-title">
+        <div class="section-heading"><h2 id="locations-title">Места</h2><span id="result-count"></span></div>
+        <div id="categories" class="categories" role="group" aria-label="Категория"></div>
+        <div class="tools">
+          <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Поиск по названию, пути или описанию</span><input id="search" type="search" placeholder="Найти место или путь" autocomplete="off" maxlength="8192"></label>
+          <label class="sort"><span class="sr-only">Сортировка</span><select id="sort"><option value="size">По объёму ↓</option><option value="name">По названию</option><option value="risk">По риску ↓</option></select></label>
+        </div>
+        <div class="list-caption"><span>МЕСТО / КАТЕГОРИЯ</span><span>ЛОГИЧЕСКИЙ ОБЪЁМ</span></div>
+        <div id="list" class="list"></div>
+        <div class="pagination"><p id="page-label" aria-live="polite"></p><div><button id="prev" type="button" aria-label="Предыдущая страница">←</button><button id="next" type="button" aria-label="Следующая страница">→</button></div></div>
+        <p class="list-note">Длина штрихов сравнивает места между собой,<br>а не показывает заполненность диска.</p>
+      </section>
+      <aside id="context" class="context" aria-labelledby="context-title" tabindex="-1">
+        <div class="section-heading"><h2 id="context-title">В контексте</h2><span class="context-index" id="context-index"></span></div>
+        <div id="detail"></div>
+        <a class="back-link" href="#locations">↑ Вернуться к местам</a>
+      </aside>
+    </div>
+    <footer><span>FOCUS — интерактивный концепт, не готовая GUI.</span><span>Только чтение · Без сканирования и удаления</span></footer>
+  </main>
+  <noscript>Для просмотра локального отчёта включите JavaScript. Внешние подключения не используются.</noscript>
+</body>
+</html>

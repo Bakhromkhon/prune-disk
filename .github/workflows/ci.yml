@@ -56,7 +56,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate report parsing and viewer interactions
-        run: node --test preview/*.test.mjs
+        run: node --test preview/*.test.mjs preview/concepts/atlas/*.test.mjs preview/concepts/focus/*.test.mjs
 
   deny:
     name: cargo-deny
