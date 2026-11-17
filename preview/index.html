@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Prune — просмотр отчёта</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="report.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">К отчёту</a>
+  <aside class="sidebar">
+    <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true">p</span>Prune<span class="version">preview</span></a>
+    <span class="readonly">Только чтение</span>
+    <div class="side-section">РАБОЧАЯ ОБЛАСТЬ</div>
+    <a class="nav-active" href="#main"><span aria-hidden="true">▤</span> Обзор отчёта</a>
+    <div class="side-note"><span class="local-dot" aria-hidden="true"></span><strong>Всё остаётся у вас</strong><p>Файл обрабатывается в браузере. Без загрузки в облако.</p></div>
+    <div class="side-footer">Локальный JSON viewer<br>Не сканирует и не удаляет файлы.</div>
+  </aside>
+  <main id="main">
+    <header class="topbar"><span>Рабочая область <span class="slash">/</span> <strong>Отчёт</strong></span><span class="offline">Локально · без сети</span></header>
+    <section class="heading">
+      <div><p class="eyebrow">АНАЛИЗ, А НЕ УДАЛЕНИЕ</p><h1>Обзор отчёта</h1><p class="subtitle">Что занимает место — и что стоит проверить.</p></div>
+      <div class="actions"><button id="demo-button" type="button">Показать демо</button><button id="import-button" type="button" class="primary">Импортировать JSON <span aria-hidden="true">↗</span></button><input id="file-input" type="file" accept=".json,application/json" hidden></div>
+    </section>
+    <div id="import-status" class="import-status" role="status" aria-live="polite"></div>
+    <section class="source-bar" aria-label="Источник отчёта"><span id="source-badge" class="demo-badge">ДЕМО</span><span id="source-name">Вымышленный отчёт</span><span id="report-meta" class="source-meta"></span></section>
+    <div id="warning" class="warning" role="status" hidden></div>
+    <section class="metrics" aria-label="Сводка">
+      <article class="metric main-metric"><p>Логический объём</p><strong id="total-bytes"></strong><span>Сумма размеров файлов, не освобождаемое место</span></article>
+      <article class="metric"><p>Найдено расположений</p><strong id="total-findings"></strong><span id="total-files"></span></article>
+      <article class="metric"><p>Требуют внимания</p><strong id="attention"></strong><span>Средний, высокий риск и «не удалять»</span></article>
+    </section>
+    <section class="breakdown panel" aria-labelledby="category-title">
+      <div class="section-title"><h2 id="category-title">Объём по категориям</h2><span>Только данные этого отчёта</span></div>
+      <div id="category-bars" class="category-bars"></div>
+    </section>
+    <section class="workspace">
+      <div class="findings panel">
+        <div class="section-title"><h2>Расположения <span id="result-count" class="count"></span></h2><span>Выберите строку для подробностей</span></div>
+        <div class="filters">
+          <label class="search-label"><span>Поиск</span><input id="search-input" type="search" placeholder="Название или путь…" maxlength="512"></label>
+          <label><span>Категория</span><select id="category"><option value="">Все категории</option></select></label>
+          <label><span>Риск</span><select id="risk"><option value="">Все уровни</option></select></label>
+          <label><span>Сортировка</span><select id="sort"><option value="size">Объём ↓</option><option value="name">Название А–Я</option><option value="risk">Сначала риск</option></select></label>
+        </div>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица расположений с горизонтальной прокруткой">
+          <table><thead><tr><th scope="col">Название / путь</th><th scope="col">Риск</th><th scope="col" class="numeric">Объём</th></tr></thead><tbody id="rows"></tbody></table>
+        </div>
+        <p id="empty" class="empty" hidden>Ничего не найдено. Измените поиск или фильтры.</p>
+        <div class="table-footer"><span id="shown" aria-live="polite"></span><div><button id="previous" type="button" aria-label="Предыдущая страница">←</button><span id="page-label"></span><button id="next" type="button" aria-label="Следующая страница">→</button></div></div>
+      </div>
+      <aside id="detail-panel" class="detail panel" aria-labelledby="detail-title">
+        <div class="section-title"><h2 id="detail-title">Подробности</h2><span class="detail-number">01</span></div>
+        <p id="detail-summary" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="detail-content"></div>
+      </aside>
+    </section>
+    <details class="diagnostics panel"><summary id="diagnostic-summary">Диагностика отчёта</summary><p id="diagnostic-note"></p><ul id="error-list"></ul></details>
+    <footer class="page-footer"><strong>Логический размер ≠ свободное место.</strong> Жёсткие ссылки могут учитываться повторно; фактически освобождённый объём не рассчитывается. Уровень риска — метка правила, а не разрешение на удаление.</footer>
+  </main>
+</body>
+</html>

@@ -87,6 +87,21 @@ Cancellation prints a partial report and exits with status 130. JSON and
 noninteractive scans do not show progress; OS signal termination in these modes
 does not guarantee a final report. See [scanning limits](docs/scanning.md).
 
+## Visual report preview
+
+An offline report viewer is available in [`preview/`](preview/README.md).
+It starts with clearly labelled fictional demo data and can import a local
+`prune scan --json` report. It does not scan, move or delete files and is not yet
+a native desktop application.
+
+```bash
+python3 -m http.server 4173 --bind 127.0.0.1 --directory preview
+# Open http://127.0.0.1:4173
+```
+
+Imported reports stay in browser memory; do not commit reports containing personal
+paths to this repository.
+
 ## Safety guarantees
 
 - **Read-only.** v0.1 has no delete code path.

@@ -43,6 +43,20 @@ jobs:
         run: cargo test --locked --workspace
       - name: Build release
         run: cargo build --locked --workspace --release
+      - name: Fixture stress scan (2,000 candidates)
+        if: runner.os != 'Windows'
+        run: python3 scripts/stress-scan.py --binary target/release/prune --candidates 2000
+
+  preview:
+    name: offline report viewer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate report parsing and viewer interactions
+        run: node --test preview/*.test.mjs
 
   deny:
     name: cargo-deny
