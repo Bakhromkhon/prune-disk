@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discovery identity indexing without a retained handle per candidate on Unix;
   bounded pairwise handles on Windows and a fail-closed candidate budget.
 
+### Preview
+
+- Larger typography, higher-contrast controls and clearer first-use guidance.
+- Plain-language report states, import recovery guidance and risk explanations.
+- Keyboard detail/back navigation and predictable pagination focus.
+- Descending category bars, responsive layouts and separate empty states.
+- Search accepts both pasted Windows paths and escaped display text.
+
 ### Security
 
 - Require an opaque validated rule set at the scanner API boundary.

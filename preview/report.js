@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
   const categories = Object.freeze({ developer: 'Разработка', browser: 'Браузеры', system: 'Система', trash: 'Корзина', apps: 'Приложения', media: 'Медиа', other: 'Другое' });
-  const risks = Object.freeze({ safe: 'Безопасный', low: 'Низкий', medium: 'Средний', high: 'Высокий', never: 'Не удалять' });
+  const risks = Object.freeze({ safe: 'Минимальный', low: 'Низкий', medium: 'Средний', high: 'Высокий', never: 'Не удалять' });
   const recreates = Object.freeze({ automatic: 'Автоматически', download: 'Повторная загрузка', rebuild: 'Повторная сборка', manual: 'Вручную', impossible: 'Невозможно', unknown: 'Неизвестно' });
   const MAX_BYTES = 5 * 1024 * 1024;
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -71,7 +71,8 @@
     const rank = Object.keys(risks);
     return findings.map((f, index) => ({ ...f, index })).filter(f =>
       (!category || f.category === category) && (!risk || f.risk === risk) &&
-      (!needle || displayText(f.path + ' ' + f.rule_name + ' ' + f.description).toLocaleLowerCase('ru').includes(needle)))
+      (!needle || (f.path + ' ' + f.rule_name + ' ' + f.description).toLocaleLowerCase('ru').includes(needle) ||
+        displayText(f.path + ' ' + f.rule_name + ' ' + f.description).toLocaleLowerCase('ru').includes(needle)))
       .sort((a, b) => (sort === 'name' ? a.rule_name.localeCompare(b.rule_name, 'ru') :
         sort === 'risk' ? rank.indexOf(b.risk) - rank.indexOf(a.risk) : b.size_bytes - a.size_bytes) || a.index - b.index);
   }

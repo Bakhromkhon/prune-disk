@@ -59,3 +59,9 @@ test('binary sizes are honest and support zero', () => {
   assert.equal(formatBytes(1024), '1 КиБ');
   assert.equal(formatBytes(1024 ** 3), '1 ГиБ');
 });
+test('Windows paths are searchable both as pasted paths and escaped display text', () => {
+  const findings = [{ ...validateReport(demo).findings[0], path: String.raw`C:\Users\Alice\AppData\Local\Temp` }];
+  assert.equal(filterFindings(findings, { query: findings[0].path }).length, 1);
+  assert.equal(filterFindings(findings, { query: displayText(findings[0].path) }).length, 1);
+  assert.equal(filterFindings(findings, { query: String.raw`c:\users\alice` }).length, 1);
+});
