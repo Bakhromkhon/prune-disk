@@ -1,9 +1,12 @@
+use crate::control::{ErrorLog, Progress};
 use crate::discovery::discover;
-use crate::measurement::{Measurement, measure, unix_secs};
-use crate::model::{ByteAccounting, Category, Risk, ScanError, ScanReport};
+use crate::measurement::{measure, unix_secs};
+use crate::model::{ByteAccounting, Category, Risk, ScanReport};
 use crate::rules::ValidatedRuleSet;
+use crate::{ScanControl, ScanProgress, ScanStage};
 use rayon::prelude::*;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 /// Options for a read-only scan. Unvalidated rules cannot enter the scanner.
@@ -34,31 +37,60 @@ impl Default for ScanOptions {
 /// a race-free filesystem sandbox: another process can replace an ancestor
 /// between a check and a read. No findings authorize later deletion.
 pub fn scan(options: &ScanOptions) -> ScanReport {
-    let mut errors = Vec::new();
-    let disjoint = discover(&options.rules, &options.os, &mut errors);
-    let measurements: Vec<Measurement> = disjoint
-        .par_iter()
+    scan_with_control(options, &ScanControl::default(), |_| {})
+}
+
+/// Per-scan bounded workers; never uses the global Rayon pool. Callbacks are
+/// serialized, synchronous, and must not block. Cancellation is cooperative:
+/// an in-flight filesystem operation cannot be interrupted.
+pub fn scan_with_control(
+    options: &ScanOptions,
+    control: &ScanControl,
+    on_progress: impl Fn(ScanProgress) + Send + Sync,
+) -> ScanReport {
+    let progress = Progress::new(control, &on_progress);
+    progress.stage(ScanStage::Discovering);
+    let mut errors = ErrorLog::default();
+    let disjoint = discover(&options.rules, &options.os, &mut errors, &progress);
+    let disjoint: Vec<_> = disjoint
+        .into_iter()
         .filter(|(rule, _)| {
             (options.categories.is_empty() || options.categories.contains(&rule.category))
                 && options.max_risk.is_none_or(|max| rule.risk <= max)
         })
-        .map(|(rule, path)| measure(rule, path, options.min_size))
         .collect();
-    let mut findings = Vec::new();
-    for measurement in measurements {
-        errors.extend(measurement.errors);
-        if let Some(finding) = measurement.finding {
-            findings.push(finding);
+    let results = Mutex::new((Vec::new(), errors));
+    if !control.is_cancelled() {
+        progress.stage(ScanStage::Measuring);
+        if !control.is_cancelled() && !disjoint.is_empty() {
+            match rayon::ThreadPoolBuilder::new()
+                .num_threads(control.worker_count().min(disjoint.len()))
+                .build()
+            {
+                Ok(pool) => pool.install(|| {
+                    disjoint.par_iter().for_each(|(rule, path)| {
+                        if control.is_cancelled() {
+                            return;
+                        }
+                        let measurement = measure(rule, path, options.min_size, &progress);
+                        let mut results = results.lock().unwrap();
+                        results.1.append(measurement.errors);
+                        if let Some(finding) = measurement.finding {
+                            results.0.push(finding);
+                        }
+                    })
+                }),
+                Err(error) => record_error(&mut results.lock().unwrap().1, Path::new(""), error),
+            }
         }
     }
+    let (mut findings, mut errors) = results.into_inner().unwrap();
     findings.sort_by(|left, right| {
         right
             .size_bytes
             .cmp(&left.size_bytes)
             .then_with(|| left.path.cmp(&right.path))
     });
-    errors.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.message.cmp(&b.message)));
-    errors.dedup_by(|a, b| a.path == b.path && a.message == b.message);
     let mut total_bytes = 0_u64;
     let mut total_files = 0_u64;
     for finding in &findings {
@@ -73,24 +105,35 @@ pub fn scan(options: &ScanOptions) -> ScanReport {
             _ => record_error(&mut errors, &finding.path, "scan totals overflow"),
         }
     }
+    let cancelled = control.is_cancelled();
+    progress.stage(if cancelled {
+        ScanStage::Cancelled
+    } else {
+        ScanStage::Completed
+    });
+    errors
+        .errors
+        .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.message.cmp(&b.message)));
+    errors
+        .errors
+        .dedup_by(|a, b| a.path == b.path && a.message == b.message);
     ScanReport {
         schema_version: 1,
         platform: options.os.clone(),
         scanned_at: unix_secs(Some(SystemTime::now())).unwrap_or(0),
         total_bytes,
         total_files,
-        partial: !errors.is_empty(),
+        partial: cancelled || !errors.is_empty(),
+        cancelled,
+        suppressed_errors: errors.suppressed,
         byte_accounting: ByteAccounting::Logical,
         findings,
-        errors,
+        errors: errors.errors,
     }
 }
 
-pub(crate) fn record_error(errors: &mut Vec<ScanError>, path: &Path, error: impl ToString) {
-    errors.push(ScanError {
-        path: path.display().to_string(),
-        message: error.to_string(),
-    });
+pub(crate) fn record_error(errors: &mut ErrorLog, path: &Path, error: impl ToString) {
+    errors.record(path, error);
 }
 
 #[cfg(test)]
@@ -118,6 +161,156 @@ mod tests {
             rules: ValidatedRuleSet::for_trusted_root(rules, root).unwrap(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pre_cancelled_scan_has_only_cancelled_terminal_and_no_findings() {
+        let control = ScanControl::default();
+        control.clone().cancel();
+        let events = Mutex::new(Vec::new());
+        let report = scan_with_control(&ScanOptions::default(), &control, |p| {
+            events.lock().unwrap().push(p);
+        });
+        assert!(report.cancelled && report.partial);
+        assert!(report.findings.is_empty());
+        let events = events.into_inner().unwrap();
+        assert_eq!(events.last().unwrap().stage, ScanStage::Cancelled);
+        assert!(!events.iter().any(|p| p.stage == ScanStage::Measuring));
+        assert!(events.iter().all(|p| p.files_measured == 0));
+    }
+
+    #[test]
+    fn cancel_after_discovery_work_does_not_measure_partial_risk_resolution() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/cache/child")).unwrap();
+        fs::write(dir.path().join("app/cache/child/file"), b"123").unwrap();
+        let opts = options(
+            dir.path(),
+            vec![
+                rule("safe", "~/app/cache", Risk::Safe),
+                rule("never", "~/app/cache/child", Risk::Never),
+            ],
+        );
+        let control = ScanControl::default();
+        let events = Mutex::new(Vec::new());
+        let report = scan_with_control(&opts, &control, |p| {
+            if p.stage == ScanStage::Discovering && p.candidates > 0 {
+                control.cancel();
+            }
+            events.lock().unwrap().push(p);
+        });
+        assert!(report.cancelled && report.partial);
+        assert!(report.findings.is_empty());
+        assert!(
+            !events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.stage == ScanStage::Measuring)
+        );
+        assert!(dir.path().join("app/cache/child/file").is_file());
+    }
+
+    #[test]
+    fn measurement_cancellation_returns_explicit_partial_observed_work() {
+        let dir = tempdir().unwrap();
+        let cache = dir.path().join("app/cache");
+        fs::create_dir_all(&cache).unwrap();
+        for i in 0..100 {
+            fs::write(cache.join(i.to_string()), b"123").unwrap();
+        }
+        let opts = options(dir.path(), vec![rule("cache", "~/app/cache", Risk::Safe)]);
+        let control = ScanControl::default().with_worker_count(1);
+        let events = Mutex::new(Vec::new());
+        let report = scan_with_control(&opts, &control, |p| {
+            if p.stage == ScanStage::Measuring && p.files_measured > 0 {
+                control.cancel();
+            }
+            events.lock().unwrap().push(p);
+        });
+        assert!(report.cancelled && report.partial);
+        assert_eq!(report.total_files, 1);
+        assert_eq!(report.total_bytes, 3);
+        assert!(report.findings[0].partial);
+        let events = events.into_inner().unwrap();
+        let last = events.last().unwrap();
+        assert_eq!(last.stage, ScanStage::Cancelled);
+        assert_eq!(last.files_measured, 1);
+        assert_eq!(last.bytes_measured, 3);
+        assert!(events.len() <= 6);
+        assert_eq!(fs::read_dir(cache).unwrap().count(), 100);
+    }
+
+    #[test]
+    fn worker_limits_clamp_and_preserve_results() {
+        assert_eq!(ScanControl::default().worker_count(), 2);
+        assert_eq!(
+            ScanControl::default().with_worker_count(0).worker_count(),
+            1
+        );
+        assert_eq!(
+            ScanControl::default()
+                .with_worker_count(usize::MAX)
+                .worker_count(),
+            crate::MAX_SCAN_WORKERS
+        );
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/cache")).unwrap();
+        for i in 0..12 {
+            fs::write(dir.path().join(format!("app/cache/{i}")), b"123").unwrap();
+        }
+        let opts = options(dir.path(), vec![rule("cache", "~/app/cache/*", Risk::Safe)]);
+        for workers in [1, 2, crate::MAX_SCAN_WORKERS] {
+            let report = scan_with_control(
+                &opts,
+                &ScanControl::default().with_worker_count(workers),
+                |_| {},
+            );
+            assert!(!report.partial && !report.cancelled);
+            assert_eq!(report.total_files, 12);
+            assert_eq!(report.total_bytes, 36);
+        }
+    }
+
+    #[test]
+    fn identity_handle_limit_discards_entire_discovery_fail_closed() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/cache")).unwrap();
+        for i in 0..crate::MAX_IDENTITY_HANDLES + 1 {
+            fs::write(dir.path().join(format!("app/cache/{i}")), b"x").unwrap();
+        }
+        let report = scan(&options(
+            dir.path(),
+            vec![rule("cache", "~/app/cache/*", Risk::Safe)],
+        ));
+        assert!(report.partial);
+        assert!(!report.cancelled);
+        assert!(report.findings.is_empty());
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.message.contains("identity handle limit"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_errors_are_bounded_and_suppression_is_reported() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let cache = dir.path().join("app/cache");
+        fs::create_dir_all(&cache).unwrap();
+        for i in 0..crate::MAX_SCAN_ERRORS + 20 {
+            symlink("missing", cache.join(i.to_string())).unwrap();
+        }
+        let report = scan(&options(
+            dir.path(),
+            vec![rule("cache", "~/app/cache/*", Risk::Safe)],
+        ));
+        assert!(report.partial);
+        assert_eq!(report.errors.len(), crate::MAX_SCAN_ERRORS);
+        assert_eq!(report.suppressed_errors, 20);
     }
 
     #[test]

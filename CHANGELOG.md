@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cooperative scan cancellation and UI-independent progress snapshots.
+- A dedicated bounded worker pool per scan, capped diagnostics and identity handles.
+- Explicit cancelled status and omitted-diagnostic counts in scan reports.
+
 ### Security
 
 - Require an opaque validated rule set at the scanner API boundary.

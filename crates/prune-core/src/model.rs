@@ -171,6 +171,11 @@ pub struct ScanReport {
     /// True when errors or skipped unsafe entries make the measurement incomplete.
     #[serde(default)]
     pub partial: bool,
+    #[serde(default)]
+    pub cancelled: bool,
+    /// Errors omitted after the bounded diagnostic buffer filled.
+    #[serde(default)]
+    pub suppressed_errors: u64,
 }
 
 impl ScanReport {
@@ -199,5 +204,7 @@ errors = []
         .unwrap();
         assert_eq!(report.byte_accounting, ByteAccounting::Logical);
         assert!(!report.partial);
+        assert!(!report.cancelled);
+        assert_eq!(report.suppressed_errors, 0);
     }
 }

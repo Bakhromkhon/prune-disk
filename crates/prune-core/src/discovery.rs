@@ -1,5 +1,6 @@
 //! Controlled immediate-child expansion and conservative overlap resolution.
-use crate::model::{Recreate, Rule, ScanError};
+use crate::control::{ErrorLog, MAX_IDENTITY_HANDLES, Progress};
+use crate::model::{Recreate, Rule};
 use crate::path_policy::{canonical_candidate, checked_identity, checked_metadata};
 use crate::rules::ValidatedRuleSet;
 use crate::scan::record_error;
@@ -8,9 +9,13 @@ use std::{fs, io, path::PathBuf};
 pub(crate) fn discover(
     rules: &ValidatedRuleSet,
     os: &str,
-    errors: &mut Vec<ScanError>,
+    errors: &mut ErrorLog,
+    progress: &Progress<'_>,
 ) -> Vec<(Rule, PathBuf)> {
     let mut candidates = Vec::new();
+    if progress.control.is_cancelled() {
+        return candidates;
+    }
     let Some(root) = &rules.root else {
         return candidates;
     };
@@ -28,6 +33,9 @@ pub(crate) fn discover(
                 continue;
             }
             for pattern in &entry.paths {
+                if progress.control.is_cancelled() {
+                    return Vec::new();
+                }
                 let mut path = root.clone();
                 for component in &pattern.components {
                     path.push(component);
@@ -37,6 +45,9 @@ pub(crate) fn discover(
                         match fs::read_dir(&path) {
                             Ok(entries) => {
                                 for child in entries {
+                                    if progress.control.is_cancelled() {
+                                        return Vec::new();
+                                    }
                                     match child {
                                         Ok(child) => match checked_metadata(&child.path()) {
                                             Ok(_) => match canonical_candidate(&child.path(), root)
@@ -55,6 +66,7 @@ pub(crate) fn discover(
                                         },
                                         Err(error) => record_error(errors, &path, error),
                                     }
+                                    progress.work(1, 0, 0, 0);
                                 }
                             }
                             Err(error) => record_error(errors, &path, error),
@@ -71,12 +83,16 @@ pub(crate) fn discover(
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                     Err(error) => record_error(errors, &path, error),
                 }
+                progress.work(1, 0, 0, 0);
             }
         }
     }
     // Identity failures must not drop a possibly dangerous descendant while
     // retaining its safe parent. Fail closed for this discovery pass.
     if normalization_failed {
+        return Vec::new();
+    }
+    if progress.control.is_cancelled() {
         return Vec::new();
     }
     // Resolve BEFORE risk/category filtering so an excluded high/never-risk
@@ -91,17 +107,21 @@ pub(crate) fn discover(
     });
     let mut disjoint: Vec<(Rule, PathBuf, same_file::Handle)> = Vec::new();
     for (rule, path) in candidates {
+        if progress.control.is_cancelled() {
+            return Vec::new();
+        }
         // canonicalize is not required to return the filesystem's stored case.
         // Compare real identities for self AND every ancestor, not path strings
         // or lowercased names. Parent-first depth order handles aliases whose
         // lexical sort order would otherwise put the descendant first.
-        let identities = match ancestor_identities(&path, root, &root_identity) {
-            Ok(identities) => identities,
-            Err(error) => {
-                record_error(errors, &path, error);
-                return Vec::new();
-            }
-        };
+        let identities =
+            match ancestor_identities(&path, root, &root_identity, progress, disjoint.len() + 1) {
+                Ok(identities) => identities,
+                Err(error) => {
+                    record_error(errors, &path, error);
+                    return Vec::new();
+                }
+            };
         if let Some((parent_rule, _, _)) = disjoint
             .iter_mut()
             .find(|(_, _, parent)| identities.iter().any(|identity| identity == parent))
@@ -128,11 +148,21 @@ fn ancestor_identities(
     path: &std::path::Path,
     root: &std::path::Path,
     root_identity: &same_file::Handle,
+    progress: &Progress<'_>,
+    retained: usize,
 ) -> io::Result<Vec<same_file::Handle>> {
     let mut identities = Vec::new();
     for ancestor in path.ancestors() {
+        if progress.control.is_cancelled() {
+            return Err(io::Error::other("scan cancelled"));
+        }
         if !ancestor.starts_with(root) {
             break;
+        }
+        if retained + identities.len() >= MAX_IDENTITY_HANDLES {
+            return Err(io::Error::other(
+                "identity handle limit reached; discovery discarded",
+            ));
         }
         let identity = checked_identity(ancestor)?;
         if ancestor == root && &identity != root_identity {
@@ -167,8 +197,16 @@ mod tests {
         }
         // Deliberately bypass canonicalization in this internal helper test:
         // guarantees the fallback is exercised on both kinds of canonicalize.
-        let identities =
-            ancestor_identities(&alias, &root, &checked_identity(&root).unwrap()).unwrap();
+        let control = crate::ScanControl::default();
+        let progress = Progress::new(&control, &|_| {});
+        let identities = ancestor_identities(
+            &alias,
+            &root,
+            &checked_identity(&root).unwrap(),
+            &progress,
+            1,
+        )
+        .unwrap();
         let parent = checked_identity(&root.join("app/cache")).unwrap();
         let equal_file = checked_identity(&root.join("app/cache/local")).unwrap();
         assert!(identities.iter().any(|identity| identity == &parent));

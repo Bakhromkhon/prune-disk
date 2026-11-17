@@ -356,7 +356,17 @@ mod tests {
     fn accepts_absolute_paths_under_home() {
         if let Some(home) = dirs::home_dir() {
             let path = home.join("prune-fixture").join("cache");
-            assert!(validate_path_pattern(&path.to_string_lossy()).is_ok());
+            assert!(validate_path_pattern(&path.to_string_lossy().replace('\\', "/")).is_ok());
+        }
+    }
+
+    #[test]
+    fn rejects_native_backslash_paths() {
+        assert!(validate_path_pattern(r"~\app\cache").is_err());
+        if let Some(home) = dirs::home_dir() {
+            let path = home.join("prune-fixture").join("cache");
+            let native_backslashes = path.to_string_lossy().replace('/', "\\");
+            assert!(validate_path_pattern(&native_backslashes).is_err());
         }
     }
 
