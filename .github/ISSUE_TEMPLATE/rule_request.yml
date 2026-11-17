@@ -1,0 +1,70 @@
+name: Rule request
+description: Suggest a new cache or disposable-data location for Prune to scan.
+title: "[rule]: "
+labels: ["rules", "good first issue"]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: Application or tool
+      placeholder: "Xcode, Docker, pnpm, ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Cross-platform
+    validations:
+      required: true
+  - type: textarea
+    id: paths
+    attributes:
+      label: Paths
+      description: One path per line. Use `~/...` for the home directory.
+      placeholder: |
+        ~/Library/Caches/Example/*
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk level
+      options:
+        - safe
+        - low
+        - medium
+        - high
+    validations:
+      required: true
+  - type: dropdown
+    id: recreate
+    attributes:
+      label: How is it recreated?
+      options:
+        - automatic
+        - download
+        - rebuild
+        - manual
+        - impossible
+        - unknown
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: How did you verify that this path is safe and correct? Link to vendor docs or show a real measurement.
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Approximate size on your machine
+      placeholder: "2.4 GB"
+    validations:
+      required: false
