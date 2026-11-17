@@ -5,7 +5,9 @@ mod util;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use prune_core::{Category, Risk, Rule, ScanOptions, builtin_rules, load_rules_from_dir, scan};
+use prune_core::{
+    Category, Risk, Rule, ScanOptions, ValidatedRuleSet, builtin_rules, load_rules_from_dir, scan,
+};
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 
@@ -123,13 +125,23 @@ enum RulesCommand {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("error: {error:#}");
+        eprintln!("error: {}", util::escape_terminal(&format!("{error:#}")));
         std::process::exit(1);
     }
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            if error.use_stderr() {
+                eprintln!("{}", util::escape_terminal(&error.to_string()));
+            } else {
+                print!("{error}");
+            }
+            std::process::exit(error.exit_code());
+        }
+    };
     match cli.command {
         Commands::Scan(args) => run_scan(args),
         Commands::Rules(args) => run_rules(args),
@@ -141,7 +153,7 @@ fn run_scan(args: ScanArgs) -> Result<()> {
     let rules = load_rules(args.rules_dir.as_deref())?;
     let options = ScanOptions {
         os: std::env::consts::OS.to_string(),
-        rules,
+        rules: ValidatedRuleSet::new(rules).context("invalid scan rules")?,
         min_size: args.min_size,
         categories: args
             .category
@@ -157,7 +169,7 @@ fn run_scan(args: ScanArgs) -> Result<()> {
         return Ok(());
     }
 
-    if !args.no_tui && io::stdout().is_terminal() {
+    if !args.no_tui && io::stdout().is_terminal() && io::stdin().is_terminal() {
         tui::run(&report)?;
     } else {
         output::print_report(&report);
@@ -194,13 +206,15 @@ fn run_doctor() -> Result<()> {
     );
     println!(
         "Home: {}",
-        dirs::home_dir()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "unknown".to_string())
+        if dirs::home_dir().is_some() {
+            "available (redacted)"
+        } else {
+            "unknown"
+        }
     );
     println!("Built-in rules: {}", rules.len());
     println!("Mode: read-only (v0.1)");
-    println!("Network: disabled by design");
+    println!("Network: no intentional network functionality (static checks are heuristic)");
     println!("Telemetry: none");
     Ok(())
 }

@@ -17,18 +17,18 @@ Do **not** open a public issue for a security problem. We will acknowledge the r
 ## Security guarantees in v0.1
 
 - **Read-only.** v0.1 has no code path that deletes, moves, renames, or writes to user files.
-- **Network-free core.** `prune-core` has no network dependencies. CI rejects network-capable crates and network APIs in the core source.
+- **No intentional network functionality.** Source and dependency checks flag selected network libraries and APIs. These checks are heuristics, not a sandbox or proof of absence of network activity.
 - **No telemetry.** There are no analytics SDKs, accounts, crash reporters, or remote calls.
 - **No privilege escalation.** Prune never uses sudo, admin rights, setuid helpers, or shell commands.
-- **Validated rules.** Rule paths must be inside the user's home directory, must be specific, cannot contain `..`, and symlinks are never followed.
-- **Memory safety.** The core crate uses `#![forbid(unsafe_code)]`.
+- **Path restrictions.** Rules are intended to address specific locations under the home directory. Path validation and no-follow checks are defense in depth, not a filesystem sandbox: concurrent replacement of filesystem objects remains a risk. No move/delete feature may rely on these read-only checks alone.
+- **Unsafe-code policy.** The core crate uses `#![forbid(unsafe_code)]`; this does not prohibit unsafe code in dependencies.
 
 ## Supply chain
 
 - `Cargo.lock` is committed and reviewed.
 - `cargo-deny` checks advisories, licenses, wildcard dependencies, and sources.
 - GitHub Actions use least-privilege permissions.
-- Releases are built from tagged source in CI, not on a maintainer laptop.
+- A tag-based release pipeline has not been implemented. Current CI builds and tests source but does not publish binary releases.
 - Release artifacts will ship with checksums, an SBOM, and build provenance attestations.
 
 ## Scope

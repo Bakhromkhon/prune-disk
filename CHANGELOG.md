@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Require an opaque validated rule set at the scanner API boundary.
+- Restrict path patterns to literal components and a terminal wildcard; reject
+  traversal spellings, link ancestors and Windows reparse points during discovery.
+- Reconcile overlapping candidates using filesystem identity before risk filtering.
+- Escape terminal control/bidi characters, including argument errors.
+- Make the network denylist guard fail closed on tooling errors.
+
+### Changed
+
+- Split path policy, discovery and measurement into separate internal modules.
+- Report logical byte accounting and partial scans explicitly.
+- Improve TUI warnings, sorting, narrow layouts, scrolling and Ctrl+C handling.
+- Pin the tested Rust baseline to 1.100.0 and use locked CI builds.
+
+These remain read-only protections, not a race-proof filesystem sandbox.
+
 ## [0.1.0] - 2026-11-17
 
 ### Added

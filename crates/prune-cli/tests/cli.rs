@@ -18,8 +18,26 @@ fn doctor_is_explicit_about_privacy() {
     cmd.arg("doctor");
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("Network: disabled by design"))
+        .stdout(predicate::str::contains(
+            "no intentional network functionality",
+        ))
         .stdout(predicate::str::contains("Telemetry: none"));
+}
+
+#[test]
+fn argument_errors_escape_control_and_bidi_characters() {
+    let output = Command::cargo_bin("prune")
+        .expect("prune binary")
+        .args(["scan", "--min-size", "bad\nFORGED\u{202e}"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let text = String::from_utf8(output).expect("utf-8 error");
+    assert!(!text.contains('\u{202e}'));
+    assert!(!text.contains("\nFORGED"));
+    assert!(text.contains("\\nFORGED"));
 }
 
 #[test]

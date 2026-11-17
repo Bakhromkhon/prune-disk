@@ -64,7 +64,14 @@ v0.1 is deliberately strict:
   - `~/Library/Caches/Homebrew/*` is accepted.
 - No `.` or `..` components.
 - No environment variables yet.
-- No symlink following during scanning.
+- Only literal path components and an optional final `/*` are supported.
+  Recursive `**`, character classes, `?`, backslashes, padded components and
+  platform device/root prefixes are rejected. This intentionally narrows the
+  rule language to avoid ambiguous expansion.
+- Unknown TOML fields are rejected. Risk labels remain declarations by rule
+  authors, not independently verified permission to delete files.
+- Discovery checks ancestors and rejects symlinks and Windows reparse points.
+  These read-only checks do not eliminate concurrent filesystem replacement.
 - No shell commands, scripts, or executable content in rules.
 
 These checks are implemented in `prune_core::validate_path_pattern` and are covered by tests.

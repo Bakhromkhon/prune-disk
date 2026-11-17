@@ -84,12 +84,12 @@ Every custom rule is validated before it is used. In v0.1, rule paths must be in
 ## Safety guarantees
 
 - **Read-only.** v0.1 has no delete code path.
-- **No network.** `prune-core` has no network dependencies; CI checks the dependency graph and source for network APIs.
+- **No intentional network functionality.** CI checks selected dependency names and source patterns. This is an additional review guard, not runtime network isolation.
 - **No telemetry.** No analytics, no accounts, no crash reporting, no remote calls.
 - **No sudo.** Prune never asks for administrator or root privileges and never runs shell commands.
 - **Rules are data, not code.** A rule cannot execute a command or elevate privileges.
-- **Path guard.** Rule paths must stay inside the home directory, cannot contain `..`, cannot point at broad roots, and symlinks are never followed.
-- **`#![forbid(unsafe_code)]`** in the core crate.
+- **Path policy.** Read-only path restrictions are being hardened against traversal and link-based escapes. They are not a sandbox against concurrent filesystem changes and must not be reused as authorization for deletion.
+- **`#![forbid(unsafe_code)]`** in the core crate (not its dependencies).
 
 ## What is next
 

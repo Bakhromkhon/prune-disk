@@ -54,8 +54,8 @@ The core is a library. The CLI is a thin shell around it. A future Tauri GUI wil
    - every path is inside the home directory and specific.
 3. Filter rules by OS, category, and maximum risk.
 4. Expand `~` to the home directory.
-5. Match paths with `glob`.
-6. Deduplicate exact paths.
+5. Resolve literal paths and an optional terminal `/*` through controlled discovery.
+6. Reconcile overlapping candidates conservatively before measurement.
 7. For each match, compute size in parallel:
    - directories are walked recursively;
    - symlinks are skipped;
@@ -89,8 +89,10 @@ See [rule-spec.md](rule-spec.md).
 - No sudo, admin, setuid, or shell execution.
 - Rule paths must stay inside the user's home directory.
 - Broad roots, `.` and `..` components, and environment variables are rejected in v0.1.
-- Symlinks are never followed.
-- Scanning does not cross filesystem boundaries.
+- Discovery rejects observed symlink ancestors and reparse points; this is not
+  race-proof resolution. Write operations require stronger platform-specific APIs.
+- Recursive measurement is constrained by filesystem boundaries relative to its
+  discovered root; this is not a blanket guarantee about all mounts under home.
 - v0.1 has no write path for user files.
 
 ## Future components
@@ -105,7 +107,7 @@ The planner will take a target ("free 50 GB") and a risk tolerance, then rank ca
 
 ### Quarantine
 
-Before any deletion, files will be moved into a local quarantine directory with a write-ahead manifest. A crash during the move must be recoverable. `prune undo` will restore from the manifest. Quarantine retention will be configurable (default 30 days).
+Before any deletion, files will be moved into a local quarantine directory with a write-ahead manifest. A crash during the move must be recoverable. `prune undo` will restore from the manifest without overwriting an existing destination. A same-volume quarantine move does not free disk space. Permanent purge is a separate irreversible operation; retention and any automatic purge policy require explicit user consent, not a silent default.
 
 ### GUI
 

@@ -102,6 +102,7 @@ impl fmt::Display for Recreate {
 ///
 /// Rules are data, not code: they cannot run commands or elevate privileges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub id: String,
     pub name: String,
@@ -133,6 +134,19 @@ pub struct Finding {
     pub file_count: u64,
     pub last_modified: Option<u64>,
     pub description: String,
+    #[serde(default)]
+    pub byte_accounting: ByteAccounting,
+    #[serde(default)]
+    pub partial: bool,
+}
+
+/// Sizes are logical file lengths, not allocated or reclaimable disk space.
+/// Hard-linked files may be counted more than once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ByteAccounting {
+    #[default]
+    Logical,
 }
 
 /// A non-fatal problem encountered during a scan.
@@ -152,10 +166,38 @@ pub struct ScanReport {
     pub total_files: u64,
     pub findings: Vec<Finding>,
     pub errors: Vec<ScanError>,
+    #[serde(default)]
+    pub byte_accounting: ByteAccounting,
+    /// True when errors or skipped unsafe entries make the measurement incomplete.
+    #[serde(default)]
+    pub partial: bool,
 }
 
 impl ScanReport {
     pub fn is_empty(&self) -> bool {
         self.findings.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_reports_deserialize_with_logical_complete_defaults() {
+        let report: ScanReport = toml::from_str(
+            r#"
+schema_version = 1
+platform = "linux"
+scanned_at = 0
+total_bytes = 0
+total_files = 0
+findings = []
+errors = []
+"#,
+        )
+        .unwrap();
+        assert_eq!(report.byte_accounting, ByteAccounting::Logical);
+        assert!(!report.partial);
     }
 }

@@ -9,12 +9,12 @@ Prune treats the user's files as the most important asset and the release pipeli
 | Property | How it is enforced |
 | --- | --- |
 | Read-only | No delete, move, rename, or write path for user files exists |
-| No network | `prune-core` has no network dependencies; CI checks the graph and source |
+| Network guard | Static checks flag selected network dependencies/APIs; no runtime isolation is claimed |
 | No telemetry | No analytics, accounts, crash reporting, or remote calls |
 | No privilege escalation | No sudo, admin, setuid, or shell execution |
-| Rule safety | Paths must be inside the home directory, specific, and free of `..` |
-| Memory safety | `#![forbid(unsafe_code)]` in `prune-core` |
-| Symlink safety | Symlinks are never followed during scanning |
+| Path policy | Specific home-scoped paths are required; read-only checks do not eliminate filesystem races |
+| Unsafe-code policy | `#![forbid(unsafe_code)]` in `prune-core`, not in all dependencies |
+| Link policy | Link traversal must be rejected during discovery; concurrent replacement requires stronger OS-specific measures before any write feature |
 
 ## Trust boundaries
 
@@ -34,14 +34,14 @@ Prune treats the user's files as the most important asset and the release pipeli
 
 ## Verification
 
-You can verify the core has no network dependencies:
+You can run the static network denylist guard:
 
 ```bash
 cargo tree -p prune-core --prefix none | grep -E '^(reqwest|hyper|ureq|isahc|curl|surf|attohttpc|tokio-tungstenite|tungstenite|quinn|h2|rustls|native-tls|openssl)( v|$)'
 ./scripts/check-no-network.sh
 ```
 
-At runtime, a network monitor such as Little Snitch, LuLu, or Wireshark should show no connections from `prune`.
+The script is a denylist-based static guard, not proof that a binary cannot use the network. Runtime observation with Little Snitch, LuLu, or Wireshark is a separate check. Access to network-mounted filesystems may itself cause OS-level network traffic.
 
 ## Future write paths
 

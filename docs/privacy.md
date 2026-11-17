@@ -35,7 +35,7 @@ These files will live in the platform's application data directory. They will ne
 
 ## Network
 
-`prune-core` has no network dependencies. CI checks the dependency graph and the core source for network APIs. A runtime network monitor (Little Snitch, LuLu, Wireshark) should show no connections from `prune`.
+Prune has no intentional network functionality. CI checks selected dependency names and source patterns; this heuristic cannot prove the absence of every network capability. Runtime observation is a separate check, and network-mounted filesystems may cause OS-level traffic.
 
 If a future feature needs the network (for example, checking for updates), it will be:
 

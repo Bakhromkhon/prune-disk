@@ -1,4 +1,5 @@
 use crate::model::Rule;
+use crate::path_policy::{ValidatedPath, parse_path_pattern};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,6 +108,84 @@ pub enum RuleError {
     },
     #[error("duplicate rule id: {0}")]
     DuplicateId(String),
+    #[error("invalid rule id: {0}")]
+    InvalidId(String),
+    #[error("invalid trusted root: {0}")]
+    InvalidRoot(String),
+}
+
+/// A validated, immutable scan capability. There is deliberately no Deserialize,
+/// mutable accessor, or conversion from an unchecked Vec<Rule>.
+///
+/// ```compile_fail
+/// use prune_core::{ScanOptions, Rule};
+/// let options = ScanOptions { rules: Vec::<Rule>::new(), ..Default::default() };
+/// ```
+#[derive(Debug, Clone)]
+pub struct ValidatedRuleSet {
+    pub(crate) root: Option<PathBuf>,
+    pub(crate) entries: Vec<ValidatedRule>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedRule {
+    pub(crate) rule: Rule,
+    pub(crate) paths: Vec<ValidatedPath>,
+}
+
+impl ValidatedRuleSet {
+    /// Validate for the current user's home, never an arbitrary filesystem root.
+    pub fn new(rules: Vec<Rule>) -> Result<Self, RuleError> {
+        let home = dirs::home_dir()
+            .ok_or_else(|| RuleError::InvalidRoot("home directory is unknown".into()))?;
+        Self::for_trusted_root(rules, home)
+    }
+
+    /// Explicitly trust a directory as the scan boundary (e.g. an isolated test
+    /// fixture). The filesystem/drive root is never accepted. The caller must
+    /// own this trust decision; do not derive it from untrusted rule content.
+    pub fn for_trusted_root(rules: Vec<Rule>, root: impl AsRef<Path>) -> Result<Self, RuleError> {
+        let supplied = root.as_ref();
+        if !supplied.is_absolute() {
+            return Err(RuleError::InvalidRoot("root must be absolute".into()));
+        }
+        let root = fs::canonicalize(supplied)
+            .map_err(|error| RuleError::InvalidRoot(error.to_string()))?;
+        if root.parent().is_none() || !root.is_dir() {
+            return Err(RuleError::InvalidRoot(
+                "root must be a non-root directory".into(),
+            ));
+        }
+        validate_rule_metadata(&rules)?;
+        let mut entries = Vec::new();
+        for rule in rules {
+            let mut paths = Vec::new();
+            for pattern in &rule.paths {
+                // Absolute compatibility paths are relative to the explicitly
+                // supplied spelling, not normalized with Path::components.
+                let path = parse_path_pattern(pattern, supplied).map_err(|reason| {
+                    RuleError::UnsafePath {
+                        rule: rule.id.clone(),
+                        path: pattern.clone(),
+                        reason,
+                    }
+                })?;
+                paths.push(path);
+            }
+            entries.push(ValidatedRule { rule, paths });
+        }
+        Ok(Self {
+            root: Some(root),
+            entries,
+        })
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self {
+            root: None,
+            entries: Vec::new(),
+        }
+    }
 }
 
 /// Parse and validate the rules compiled into the binary.
@@ -161,9 +240,33 @@ fn parse_rule(name: &str, source: &str) -> Result<Rule, RuleError> {
 }
 
 fn validate_rules(rules: &[Rule]) -> Result<(), RuleError> {
+    validate_rule_metadata(rules)?;
+    for rule in rules {
+        for path in &rule.paths {
+            validate_path_pattern(path).map_err(|reason| RuleError::UnsafePath {
+                rule: rule.id.clone(),
+                path: path.clone(),
+                reason,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_rule_metadata(rules: &[Rule]) -> Result<(), RuleError> {
     let mut ids = HashSet::new();
 
     for rule in rules {
+        if rule.id.is_empty()
+            || rule.id.len() > 128
+            || !rule
+                .id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            || !rule.id.as_bytes()[0].is_ascii_alphanumeric()
+        {
+            return Err(RuleError::InvalidId(rule.id.clone()));
+        }
         if !ids.insert(rule.id.clone()) {
             return Err(RuleError::DuplicateId(rule.id.clone()));
         }
@@ -172,20 +275,20 @@ fn validate_rules(rules: &[Rule]) -> Result<(), RuleError> {
                 rule: rule.id.clone(),
             });
         }
+        let mut seen_os = HashSet::new();
+        if rule.os.is_empty() {
+            return Err(RuleError::InvalidOs {
+                rule: rule.id.clone(),
+                os: "(empty)".into(),
+            });
+        }
         for os in &rule.os {
-            if !matches!(os.as_str(), "macos" | "windows" | "linux") {
+            if !matches!(os.as_str(), "macos" | "windows" | "linux") || !seen_os.insert(os) {
                 return Err(RuleError::InvalidOs {
                     rule: rule.id.clone(),
                     os: os.clone(),
                 });
             }
-        }
-        for path in &rule.paths {
-            validate_path_pattern(path).map_err(|reason| RuleError::UnsafePath {
-                rule: rule.id.clone(),
-                path: path.clone(),
-                reason,
-            })?;
         }
     }
 
@@ -199,73 +302,8 @@ fn validate_rules(rules: &[Rule]) -> Result<(), RuleError> {
 /// and specific. Broad roots such as `~/Library/*` and any `..` traversal are
 /// rejected. This is a safety invariant, not a convenience check.
 pub fn validate_path_pattern(pattern: &str) -> Result<(), String> {
-    const BROAD_ROOTS: &[&str] = &[
-        "Library",
-        "Documents",
-        "Desktop",
-        "Downloads",
-        "Pictures",
-        "Movies",
-        "Music",
-        "Applications",
-        "Projects",
-        "Developer",
-        "Public",
-    ];
-
-    let pattern = pattern.trim();
-    if pattern.is_empty() {
-        return Err("path is empty".to_string());
-    }
-    if pattern.contains('\0') {
-        return Err("path contains a NUL byte".to_string());
-    }
-    if pattern.contains('$') {
-        return Err("environment variables are not supported yet".to_string());
-    }
-    let rest: String = if let Some(rest) = pattern.strip_prefix("~/") {
-        rest.to_string()
-    } else if Path::new(pattern).is_absolute() {
-        let home = dirs::home_dir().ok_or_else(|| "home directory is unknown".to_string())?;
-        let rest = Path::new(pattern)
-            .strip_prefix(&home)
-            .map_err(|_| "absolute paths must be under the home directory".to_string())?;
-        rest.to_string_lossy().replace('\\', "/")
-    } else {
-        return Err("path must start with ~/ or be under the home directory".to_string());
-    };
-
-    if rest.is_empty() {
-        return Err("path must not be the home directory".to_string());
-    }
-
-    let components: Vec<&str> = rest
-        .split('/')
-        .filter(|component| !component.is_empty())
-        .collect();
-    if components.is_empty() {
-        return Err("path must not be the home directory".to_string());
-    }
-    if components
-        .iter()
-        .any(|component| *component == ".." || *component == ".")
-    {
-        return Err("path must not contain . or .. components".to_string());
-    }
-    if components.len() < 2 {
-        return Err("path is too broad; use a more specific path".to_string());
-    }
-    if matches!(components[0], "*" | "**") {
-        return Err("path is too broad; use a more specific path".to_string());
-    }
-    if BROAD_ROOTS.contains(&components[0])
-        && components.len() <= 2
-        && matches!(components[1], "*" | "**")
-    {
-        return Err("path is too broad; use a more specific path".to_string());
-    }
-
-    Ok(())
+    let home = dirs::home_dir().ok_or_else(|| "home directory is unknown".to_string())?;
+    parse_path_pattern(pattern, &home).map(|_| ())
 }
 
 #[cfg(test)]
@@ -319,6 +357,123 @@ mod tests {
         if let Some(home) = dirs::home_dir() {
             let path = home.join("prune-fixture").join("cache");
             assert!(validate_path_pattern(&path.to_string_lossy()).is_ok());
+        }
+    }
+
+    #[test]
+    fn rejects_all_confirmed_path_bypasses() {
+        for pattern in [
+            "~//absolute/cache",
+            "~/app//cache",
+            "~/app/cache/",
+            "~/app/../cache",
+            "~/app/./cache",
+            "~/.[.]/outside/*",
+            "~/app\\..\\outside/cache",
+            "~/app/\\absolute",
+            " ~/app/cache",
+            "~/app/cache ",
+            "~/app/\tcache",
+            "~/app/\ncache",
+            "~/app/\0cache",
+            "~/app/**",
+            "~/app/c?che",
+            "~/app/[cache]",
+            "~/app/{a,b}",
+            "~/app/*/cache",
+            "~/app/cache*",
+            "~/app/C:/cache",
+            "~/app/.. /cache",
+            "~/app/cache.",
+            "~/app/CON.txt",
+            "~/app/COM1",
+            "~/library/*",
+            "~/DOWNLOADS/*",
+            "~/app/$HOME",
+            "~/app/~outside",
+            "//server/share/cache",
+            "\\\\server\\share\\cache",
+        ] {
+            assert!(validate_path_pattern(pattern).is_err(), "{pattern:?}");
+        }
+    }
+
+    fn fixture_rule() -> Rule {
+        builtin_rules().unwrap().into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn public_capability_validates_programmatically_constructed_rules() {
+        let root = tempfile::tempdir().unwrap();
+        for path in ["~//absolute/cache", "~/.[.]/outside/*", "~/app\\../cache"] {
+            let mut rule = fixture_rule();
+            rule.paths = vec![path.into()];
+            assert!(ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_err());
+        }
+        let mut rule = fixture_rule();
+        rule.paths = vec!["~/app/cache".into()];
+        let validated =
+            ValidatedRuleSet::for_trusted_root(vec![rule.clone()], root.path()).unwrap();
+        rule.paths[0] = "~//outside/cache".into();
+        assert_eq!(validated.entries[0].paths[0].components, ["app", "cache"]);
+        assert!(ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_err());
+    }
+
+    #[test]
+    fn rejects_bad_ids_empty_duplicate_and_unknown_os() {
+        let root = tempfile::tempdir().unwrap();
+        for id in ["", "with space", "../id", "UPPER", "-prefix", "id\n"] {
+            let mut rule = fixture_rule();
+            rule.id = id.into();
+            assert!(ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_err());
+        }
+        for os in [vec![], vec!["linux", "linux"], vec!["other"], vec!["Linux"]] {
+            let mut rule = fixture_rule();
+            rule.os = os.into_iter().map(str::to_owned).collect();
+            assert!(ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_err());
+        }
+        let rule = fixture_rule();
+        assert!(ValidatedRuleSet::for_trusted_root(vec![rule.clone(), rule], root.path()).is_err());
+    }
+
+    #[test]
+    fn schema_rejects_unknown_fields() {
+        let source = BUILTIN_RULE_SOURCES[0].1;
+        assert!(parse_rule("unknown", &format!("{source}\nunexpected = true\n")).is_err());
+    }
+
+    #[test]
+    fn trusted_root_is_explicit_and_never_filesystem_root() {
+        let root = tempfile::tempdir().unwrap();
+        let filesystem_root = root.path().ancestors().last().unwrap();
+        assert!(ValidatedRuleSet::for_trusted_root(vec![], filesystem_root).is_err());
+        assert!(ValidatedRuleSet::for_trusted_root(vec![], Path::new(".")).is_err());
+        let mut rule = fixture_rule();
+        rule.paths = vec!["/outside/app/cache".into()];
+        assert!(ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_err());
+        let mut rule = fixture_rule();
+        rule.paths = vec!["~/app/cache".into()];
+        assert!(ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_ok());
+    }
+
+    #[test]
+    fn absolute_patterns_are_not_normalized_before_validation() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().to_str().unwrap().replace('\\', "/");
+        for suffix in [
+            "/app/../outside",
+            "//outside/cache",
+            "/app/./cache",
+            "/app//cache",
+            "/app/cache/",
+            "/.[.]/outside/*",
+        ] {
+            let mut rule = fixture_rule();
+            rule.paths = vec![format!("{prefix}{suffix}")];
+            assert!(
+                ValidatedRuleSet::for_trusted_root(vec![rule], root.path()).is_err(),
+                "{suffix}"
+            );
         }
     }
 }
