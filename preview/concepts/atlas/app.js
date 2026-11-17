@@ -17,6 +17,8 @@
   }
   let report, category = '', selected = null, rows = [], imported = false;
   let importGeneration = 0;
+  const PAGE_SIZE = 30;
+  let page = 0, initiatingRow = null;
   const riskAdvice = {
     safe: 'Минимальный риск не означает, что удаление обязательно или полностью безопасно.',
     low: 'Файлы могут понадобиться снова. Учитывайте время и условия восстановления.',
@@ -36,6 +38,7 @@
   function chooseCategory(key) {
     const origin = document.activeElement.parentElement?.id;
     category = key;
+    page = 0;
     renderNavigation();
     renderRows();
     if (origin === 'categories' || origin === 'ribbon') {
@@ -59,28 +62,25 @@
     for (const group of groups()) {
       if (!group.bytes) continue;
       const share = group.bytes / report.total_bytes;
-      const button = element('button');
-      button.type = 'button';
-      button.dataset.category = group.key;
-      button.style.flexGrow = String(group.bytes);
-      button.style.flexBasis = '0px';
-      button.setAttribute('aria-pressed', String(group.key === category));
-      // In the overview, the largest share is the single accent, not a second dataset.
-      if (!category && $('ribbon').childElementCount === 0) button.className = 'lead-share';
-      button.setAttribute('aria-label', group.label + ': ' + R.formatBytes(group.bytes) + ', ' + Math.round(share * 100) + '% объёма отчёта');
-      button.title = button.getAttribute('aria-label');
-      if (share > .13) button.append(element('span', Math.round(share * 100) + '%'));
-      button.addEventListener('click', () => chooseCategory(group.key));
-      $('ribbon').append(button);
+      const segment = element('span');
+      segment.style.flexGrow = String(group.bytes);
+      segment.style.flexBasis = '0px';
+      segment.setAttribute('aria-hidden', 'true');
+      if (group.key === category) segment.className = 'active-share';
+      segment.title = group.label + ': ' + Math.round(share * 100) + '%';
+      $('ribbon').append(segment);
     }
     if (!report.total_bytes) $('ribbon').append(element('span', 'Нет объёма для распределения'));
+    $('ribbon').setAttribute('aria-label', 'Доли объёма: ' + groups().map(group => group.label + ' ' + R.formatBytes(group.bytes)).join(', ') + '. Иллюстрация; категории доступны в навигации.');
   }
   function renderOverview() {
     const formatted = R.formatBytes(report.total_bytes);
     const separator = formatted.lastIndexOf(' ');
     $('total').replaceChildren(document.createTextNode(formatted.slice(0, separator)), element('span', formatted.slice(separator + 1)));
     text($('total-context'), number(report.total_bytes) + ' Б · ' + number(report.total_files) + ' файлов · ' + report.findings.length + ' записей');
-    text($('report-state'), report.cancelled ? 'ОТМЕНЁН · НЕПОЛНЫЙ' : report.partial ? 'НЕПОЛНЫЙ ОТЧЁТ' : 'ПОЛНЫЙ ПО ДАННЫМ JSON');
+    $('report-state').hidden = !report.cancelled && !report.partial;
+    $('report-state').className = 'state warning';
+    text($('report-state'), report.cancelled ? 'Сканирование отменено. Показана только часть данных.' : 'Неполный отчёт: объём может быть занижен.');
     const largest = groups()[0];
     text($('dominant-category'), largest && report.total_bytes ? largest.label + ' · ' + Math.round(largest.bytes / report.total_bytes * 100) + '% объёма' : 'Категории без объёма');
     text($('safety-note'), (report.cancelled ? 'Сканирование было отменено. ' : '') + (report.partial ? 'Данные неполные; показаны только полученные записи. ' : '') + 'Логический размер, не освобождаемое место. Сумма не учитывает совместные блоки, сжатие и снимки.');
@@ -99,35 +99,46 @@
     text($('results-title'), category ? R.categories[category] : 'Все категории');
     text($('result-count'), rows.length + ' из ' + report.findings.length + ' записей · ' + R.formatBytes(rows.reduce((n, f) => n + f.size_bytes, 0)));
     $('findings').replaceChildren();
-    rows.forEach((finding, position) => {
+    page = Math.min(page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1));
+    const visible = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    if (!visible.some(f => f.index === selected)) selected = visible[0]?.index ?? null;
+    visible.forEach(finding => {
       const button = element('button', undefined, 'finding'); button.type = 'button';
+      button.dataset.index = String(finding.index);
       button.setAttribute('aria-pressed', String(selected === finding.index));
       button.setAttribute('aria-controls', 'inspector');
       const name = element('span');
       name.append(element('span', finding.rule_name, 'row-name'), element('span', finding.path, 'row-path'));
       const size = element('span', R.formatBytes(finding.size_bytes), 'row-size');
       size.append(element('small', R.risks[finding.risk] + (finding.partial ? ' · неполно' : '')));
-      button.append(element('span', String(position + 1).padStart(2, '0'), 'row-number'), name, size);
+      button.append(name, size);
       button.addEventListener('click', () => {
         selected = finding.index;
+        initiatingRow = finding.index;
         for (const row of $('findings').children) row.setAttribute('aria-pressed', String(row === button));
         renderInspector();
-        if (matchMedia('(max-width: 700px)').matches) {
-          $('inspector').scrollIntoView({ block: 'start' });
-          $('inspector').focus({ preventScroll: true });
-        }
       });
       $('findings').append(button);
     });
     $('empty').hidden = rows.length > 0;
+    const hasFindings = report.findings.length > 0;
+    text($('empty-message'), hasFindings ? 'По этим условиям ничего не найдено. Измените поиск, риск или категорию.' : report.partial || report.cancelled ? 'В неполном отчёте нет записей. Это не значит, что файлов нет. Откройте другой отчёт.' : 'В этом отчёте нет записей. Чтобы посмотреть другие данные, откройте другой отчёт.');
+    $('clear-filters').hidden = !hasFindings;
+    $('pagination').hidden = rows.length <= PAGE_SIZE;
+    $('previous-page').disabled = page === 0;
+    $('next-page').disabled = (page + 1) * PAGE_SIZE >= rows.length;
+    text($('page-label'), 'Страница ' + (page + 1) + ' из ' + Math.max(1, Math.ceil(rows.length / PAGE_SIZE)));
+    $('jump-detail').disabled = selected === null;
     renderInspector();
   }
   function renderInspector() {
     const target = $('inspector-content');
     target.replaceChildren();
+    const current = selected === null ? null : report.findings[selected];
+    text($('selection-status'), current ? 'Выбрано: ' + current.rule_name : 'Запись не выбрана.');
     if (selected === null) {
-      const title = element('h2', 'Ничего не выбрано'); title.id = 'inspector-title';
-      target.append(title, element('p', 'Выберите категорию или измените фильтры, чтобы увидеть запись.', 'inspector-description'));
+      const title = element('h2', report.findings.length ? 'Ничего не выбрано' : 'Нет записей для просмотра'); title.id = 'inspector-title';
+      target.append(title, element('p', report.findings.length ? 'Измените фильтры, чтобы увидеть запись.' : report.partial || report.cancelled ? 'Получена только часть данных. Откройте другой отчёт.' : 'Откройте другой отчёт или вернитесь к демо.', 'inspector-description'));
       return;
     }
     const f = report.findings[selected];
@@ -137,7 +148,7 @@
     target.append(element('h3', 'Риск · ' + R.risks[f.risk]), element('p', riskAdvice[f.risk], 'inspector-description'));
     const dl = element('dl');
     const pairs = [
-      ['Восстановление', R.recreates[f.recreate]],
+      ['Как данные могут появиться снова', R.recreates[f.recreate] + '. Возврат прежнего содержимого не гарантирован.'],
       ['Последнее изменение', f.last_modified === null ? 'Нет данных' : date(f.last_modified)],
       ['Полнота записи', f.partial ? 'Неполная — размер может быть занижен' : 'Нет признака неполноты'],
       ['Правило', f.rule_id]
@@ -146,12 +157,12 @@
     target.append(dl);
   }
   function resetFilters() {
-    category = ''; $('search').value = ''; $('risk').value = ''; $('sort').value = 'size';
+    category = ''; page = 0; $('search').value = ''; $('risk').value = ''; $('sort').value = 'size';
   }
   function load(next, name) {
-    report = next; imported = Boolean(name); selected = null; resetFilters();
+    report = next; imported = Boolean(name); selected = null; initiatingRow = null; resetFilters();
     text($('source-label'), imported ? 'Локальный файл · ' + name : 'Вымышленное демо');
-    text($('source-note'), imported ? 'Импортированный JSON. Источник и достоверность данных не проверены.' : 'Вымышленные пути и размеры. Это не данные вашего Mac.');
+    text($('source-note'), imported ? 'Локальный отчёт. Источник и достоверность данных не проверены.' : 'Вымышленные пути и размеры. Это не данные вашего Mac.');
     $('demo-button').hidden = !imported;
     renderOverview(); renderNavigation(); renderRows();
   }
@@ -179,8 +190,27 @@
     $('import-status').hidden = true;
   });
   $('clear-filters').addEventListener('click', () => { resetFilters(); renderNavigation(); renderRows(); $('search').focus(); });
-  $('search').addEventListener('input', renderRows);
-  $('risk').addEventListener('change', renderRows);
-  $('sort').addEventListener('change', renderRows);
+   function filterChanged() {
+     const filtered = R.filterFindings(report.findings, { category, risk: $('risk').value, query: $('search').value, sort: $('sort').value });
+     page = Math.max(0, Math.floor(filtered.findIndex(f => f.index === selected) / PAGE_SIZE));
+     renderRows();
+   }
+   $('search').addEventListener('input', filterChanged);
+   $('risk').addEventListener('change', filterChanged);
+   $('sort').addEventListener('change', filterChanged);
+   $('previous-page').addEventListener('click', () => { page--; renderRows(); });
+   $('next-page').addEventListener('click', () => { page++; renderRows(); });
+   $('jump-detail').addEventListener('click', () => {
+     initiatingRow = selected;
+     $('inspector').focus();
+     $('inspector').scrollIntoView({ block: 'nearest' });
+   });
+   $('back-to-list').addEventListener('click', () => {
+     const index = rows.findIndex(f => f.index === initiatingRow);
+     if (index < 0) { $('results-title').focus(); return; }
+     page = Math.floor(index / PAGE_SIZE);
+     renderRows();
+     Array.from($('findings').children).find(row => row.dataset.index === String(initiatingRow))?.focus();
+   });
   load(R.validateReport(globalThis.AtlasDemo));
 })();
