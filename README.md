@@ -32,7 +32,7 @@ Prune is built around three questions:
 
 ## Quick start
 
-Requires Rust stable (1.85+).
+Requires the current Rust stable toolchain.
 
 ```bash
 git clone https://github.com/Bakhromkhon/prune-disk.git

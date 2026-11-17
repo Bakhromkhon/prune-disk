@@ -318,4 +318,41 @@ mod tests {
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.total_bytes, 4);
     }
+
+    #[test]
+    fn scan_preserves_file_contents_and_modification_time() {
+        let dir = tempdir().expect("temporary directory");
+        let file = dir.path().join("cache.bin");
+        fs::write(&file, b"keep me intact").expect("fixture");
+        let before = fs::metadata(&file).unwrap().modified().unwrap();
+        let report = scan(&ScanOptions {
+            rules: vec![test_rule(&file)],
+            ..ScanOptions::default()
+        });
+        assert_eq!(report.total_bytes, 14);
+        assert_eq!(fs::read(&file).unwrap(), b"keep me intact");
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_symlink_roots_and_nested_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().expect("temporary directory");
+        let cache = dir.path().join("cache");
+        fs::create_dir(&cache).unwrap();
+        fs::write(cache.join("local.bin"), b"1234").unwrap();
+        let outside = dir.path().join("private.bin");
+        fs::write(&outside, b"private data").unwrap();
+        symlink(&outside, cache.join("linked.bin")).unwrap();
+        let linked_root = dir.path().join("linked-cache");
+        symlink(&cache, &linked_root).unwrap();
+        let report = scan(&ScanOptions {
+            rules: vec![test_rule(&cache), test_rule(&linked_root)],
+            ..ScanOptions::default()
+        });
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.total_bytes, 4);
+        assert_eq!(report.total_files, 1);
+    }
 }

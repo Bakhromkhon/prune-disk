@@ -10,7 +10,7 @@ By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 Requirements:
 
-- Rust stable (1.85 or newer). Install it with [rustup](https://rustup.rs/).
+- Current Rust stable. Install it with [rustup](https://rustup.rs/).
 - Git.
 
 ```bash
