@@ -1,0 +1,12 @@
+id = "yarn-cache"
+name = "Yarn Cache"
+description = "Downloaded Yarn packages. Yarn re-downloads them when needed."
+os = ["macos", "windows", "linux"]
+category = "developer"
+risk = "safe"
+recreate = "download"
+paths = [
+  "~/Library/Caches/Yarn",
+  "~/.cache/yarn",
+  "~/AppData/Local/Yarn/Cache",
+]

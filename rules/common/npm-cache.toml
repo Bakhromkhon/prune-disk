@@ -1,0 +1,8 @@
+id = "npm-cache"
+name = "npm Cache"
+description = "npm's content-addressable package cache. npm re-downloads packages when needed."
+os = ["macos", "windows", "linux"]
+category = "developer"
+risk = "safe"
+recreate = "download"
+paths = ["~/.npm/_cacache"]

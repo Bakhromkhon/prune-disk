@@ -1,0 +1,12 @@
+id = "pip-cache"
+name = "pip Cache"
+description = "Downloaded Python packages cached by pip. pip re-downloads them when needed."
+os = ["macos", "windows", "linux"]
+category = "developer"
+risk = "safe"
+recreate = "download"
+paths = [
+  "~/Library/Caches/pip",
+  "~/.cache/pip",
+  "~/AppData/Local/pip/Cache",
+]

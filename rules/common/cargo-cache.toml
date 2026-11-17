@@ -1,0 +1,8 @@
+id = "cargo-cache"
+name = "Cargo Cache"
+description = "Downloaded Rust crate archives and git checkouts. Cargo re-downloads them when needed."
+os = ["macos", "windows", "linux"]
+category = "developer"
+risk = "safe"
+recreate = "download"
+paths = ["~/.cargo/registry/cache", "~/.cargo/git/checkouts"]

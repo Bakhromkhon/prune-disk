@@ -1,0 +1,8 @@
+id = "xcode-archives"
+name = "Xcode Archives"
+description = "Archived builds created by Xcode. Remove only archives you no longer need for App Store submission, TestFlight or crash symbolication."
+os = ["macos"]
+category = "developer"
+risk = "medium"
+recreate = "rebuild"
+paths = ["~/Library/Developer/Xcode/Archives/*"]

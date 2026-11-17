@@ -1,0 +1,8 @@
+id = "chrome-cache"
+name = "Google Chrome Cache"
+description = "Chrome's local cache of web resources. Chrome rebuilds it automatically; this rule does not touch your profile, history or saved passwords."
+os = ["macos"]
+category = "browser"
+risk = "safe"
+recreate = "automatic"
+paths = ["~/Library/Caches/Google/Chrome/*"]

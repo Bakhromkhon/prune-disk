@@ -1,0 +1,8 @@
+id = "trash"
+name = "Trash"
+description = "Files currently in the Trash. Emptying the Trash is permanent; review these files before removing them."
+os = ["macos"]
+category = "trash"
+risk = "high"
+recreate = "impossible"
+paths = ["~/.Trash/*"]

@@ -1,0 +1,12 @@
+id = "go-build-cache"
+name = "Go Build Cache"
+description = "Compiled Go build artifacts. Go recreates them automatically, though the next build will be slower."
+os = ["macos", "windows", "linux"]
+category = "developer"
+risk = "safe"
+recreate = "automatic"
+paths = [
+  "~/Library/Caches/go-build",
+  "~/.cache/go-build",
+  "~/AppData/Local/go-build",
+]

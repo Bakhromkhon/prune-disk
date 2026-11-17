@@ -1,0 +1,12 @@
+id = "pnpm-store"
+name = "pnpm Store"
+description = "pnpm's global content-addressable store. pnpm re-downloads packages when needed; existing projects may need to re-link packages."
+os = ["macos", "windows", "linux"]
+category = "developer"
+risk = "safe"
+recreate = "download"
+paths = [
+  "~/Library/pnpm/store",
+  "~/.local/share/pnpm/store",
+  "~/AppData/Local/pnpm/store",
+]

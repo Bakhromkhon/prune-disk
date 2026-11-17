@@ -1,0 +1,8 @@
+id = "homebrew-cache"
+name = "Homebrew Cache"
+description = "Downloaded Homebrew bottles and source archives. Homebrew re-downloads them when needed."
+os = ["macos"]
+category = "developer"
+risk = "safe"
+recreate = "download"
+paths = ["~/Library/Caches/Homebrew/*"]

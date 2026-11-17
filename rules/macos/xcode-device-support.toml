@@ -1,0 +1,12 @@
+id = "xcode-device-support"
+name = "Xcode DeviceSupport"
+description = "Debug symbols copied from connected iOS, watchOS and tvOS devices. Xcode recreates them the next time a device is connected."
+os = ["macos"]
+category = "developer"
+risk = "safe"
+recreate = "automatic"
+paths = [
+  "~/Library/Developer/Xcode/iOS DeviceSupport/*",
+  "~/Library/Developer/Xcode/watchOS DeviceSupport/*",
+  "~/Library/Developer/Xcode/tvOS DeviceSupport/*",
+]

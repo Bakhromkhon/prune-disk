@@ -1,0 +1,8 @@
+id = "user-logs"
+name = "User Logs"
+description = "Log files written by apps and system services under ~/Library/Logs. Most are recreated automatically, but they can be useful when debugging a problem."
+os = ["macos"]
+category = "system"
+risk = "low"
+recreate = "automatic"
+paths = ["~/Library/Logs/*"]

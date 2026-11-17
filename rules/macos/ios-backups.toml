@@ -1,0 +1,8 @@
+id = "ios-backups"
+name = "iPhone and iPad Backups"
+description = "Local device backups created by Finder or iTunes. Removing a backup cannot be undone unless you have another copy; make sure iCloud or another backup exists first."
+os = ["macos"]
+category = "system"
+risk = "high"
+recreate = "impossible"
+paths = ["~/Library/Application Support/MobileSync/Backup/*"]
