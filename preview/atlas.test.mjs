@@ -5,13 +5,13 @@ import vm from 'node:vm';
 
 const here = new URL('.', import.meta.url);
 const context = vm.createContext({ TextEncoder, Intl });
-vm.runInContext(readFileSync(new URL('../../report.js', here), 'utf8'), context);
+vm.runInContext(readFileSync(new URL('report.js', here), 'utf8'), context);
 vm.runInContext(readFileSync(new URL('demo.js', here), 'utf8'), context);
 const R = context.PruneReport;
 const demo = () => JSON.parse(JSON.stringify(context.AtlasDemo));
 
 test('embedded demo exactly matches the shared fictional fixture', () => {
-  assert.deepEqual(demo(), JSON.parse(readFileSync(new URL('../../demo-report.json', here), 'utf8')));
+  assert.deepEqual(demo(), JSON.parse(readFileSync(new URL('demo-report.json', here), 'utf8')));
   assert.equal(R.validateReport(demo()).total_bytes, 17490247680);
 });
 
@@ -51,6 +51,6 @@ test('concept keeps restrictive CSP and no markup sink', () => {
   const app = readFileSync(new URL('app.js', here), 'utf8');
   assert.match(html, /connect-src 'none'/);
   assert.match(html, /default-src 'none'/);
-  assert.match(html, /src="\.\.\/\.\.\/report\.js"/);
+  assert.match(html, /src="report\.js"/);
   assert.doesNotMatch(app, /innerHTML|outerHTML|insertAdjacentHTML|fetch\(/);
 });

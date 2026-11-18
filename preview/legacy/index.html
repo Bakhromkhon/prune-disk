@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Prune — предыдущий просмотрщик</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="../report.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <p class="legacy-banner">Предыдущий вариант интерфейса. <a href="../">Открыть Atlas</a></p>
+  <a class="skip" href="#main">К отчёту</a>
+  <aside class="sidebar">
+    <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true">p</span>Prune<span class="version">preview</span></a>
+    <span class="readonly">Только чтение</span>
+    <div class="side-section">РАБОЧАЯ ОБЛАСТЬ</div>
+    <a class="nav-active" href="#main"><span aria-hidden="true">▤</span> Обзор отчёта</a>
+    <div class="side-note"><span class="local-dot" aria-hidden="true"></span><strong>Всё остаётся у вас</strong><p>Файл обрабатывается в браузере. Без загрузки в облако.</p></div>
+    <div class="side-footer">Локальный JSON viewer<br>Не сканирует и не удаляет файлы.</div>
+  </aside>
+  <main id="main">
+    <header class="topbar"><span>Рабочая область <span class="slash">/</span> <strong>Отчёт</strong></span><span class="offline">Локально · без сети</span></header>
+    <section class="heading">
+      <div><h1>Обзор отчёта</h1><p class="subtitle">Просмотрщик: не сканирует компьютер и не удаляет файлы.</p></div>
+      <div class="actions"><button id="import-button" type="button" class="primary">Открыть отчёт…</button><button id="demo-button" type="button">Посмотреть пример</button><input id="file-input" type="file" accept=".json,application/json" hidden></div>
+    </section>
+    <p class="import-help">Файл .json до 5 МиБ · обрабатывается только в вашем браузере, никуда не отправляется.</p>
+    <details class="export-help"><summary>Где взять отчёт?</summary><p>Экспорт пока технический: Prune — alpha, простого экспорта через интерфейс ещё нет. Если CLI уже установлен, выполните в терминале:</p><pre><code>prune scan --json &gt; report.json</code></pre><p>Затем откройте report.json здесь. Команда сканирует, но не удаляет файлы. Отчёт может содержать личные пути — не публикуйте его без проверки.</p></details>
+    <div id="import-status" class="import-status" role="status" aria-live="polite" aria-atomic="true"></div>
+    <details id="import-error-detail" class="export-help" hidden><summary>Техническая причина</summary><p id="import-error-message"></p></details>
+    <section class="source-bar" aria-label="Источник отчёта"><span id="source-badge" class="demo-badge">ДЕМО</span><span id="source-name">Вымышленный отчёт</span><span id="report-meta" class="source-meta"></span></section>
+    <div id="warning" class="warning" role="status" hidden></div>
+    <section class="metrics" aria-label="Сводка">
+      <article class="metric main-metric"><p>Суммарный размер файлов</p><strong id="total-bytes"></strong><span>Логический размер, не прогноз свободного места. Жёсткие ссылки могут учитываться повторно.</span></article>
+      <article class="metric"><p>Найдено расположений</p><strong id="total-findings"></strong><span id="total-files"></span></article>
+      <article class="metric"><p>Требуют внимания</p><strong id="attention"></strong><span>Средний, высокий риск и «не удалять»</span></article>
+    </section>
+    <section class="breakdown panel" aria-labelledby="category-title">
+      <div class="section-title"><h2 id="category-title">Объём по категориям</h2></div>
+      <div id="category-bars" class="category-bars"></div>
+    </section>
+    <section class="workspace">
+      <div class="findings panel">
+        <div class="section-title"><h2>Расположения <span id="result-count" class="count"></span></h2><button id="jump-detail" type="button" aria-controls="detail-panel">Перейти к подробностям</button></div>
+        <p class="risk-help">Риск удаления — оценка правила, не разрешение на удаление. «Минимальный» означает минимальный по оценке правила, а не отсутствие риска.</p>
+        <div class="filters">
+          <label class="search-label"><span>Поиск</span><input id="search-input" type="search" placeholder="Название или путь…" maxlength="512"></label>
+          <label><span>Категория</span><select id="category"><option value="">Все категории</option></select></label>
+          <label><span>Риск удаления</span><select id="risk"><option value="">Все уровни</option></select></label>
+          <label><span>Сортировка</span><select id="sort"><option value="size">Сначала больший размер</option><option value="name">По названию А–Я</option><option value="risk">Сначала наибольший риск</option></select></label>
+        </div>
+        <button id="reset-filters" class="reset-filters" type="button">Сбросить фильтры</button>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица расположений с горизонтальной прокруткой">
+          <table><thead><tr><th scope="col">Название / путь</th><th scope="col">Риск удаления</th><th scope="col" class="numeric">Размер</th></tr></thead><tbody id="rows"></tbody></table>
+        </div>
+        <p id="empty" class="empty" role="status" hidden></p>
+        <div class="table-footer"><span id="shown"></span><div><button id="previous" type="button" aria-label="Предыдущая страница" aria-controls="rows">←</button><span id="page-label" tabindex="-1" role="status" aria-live="polite" aria-atomic="true"></span><button id="next" type="button" aria-label="Следующая страница" aria-controls="rows">→</button></div></div>
+      </div>
+      <aside id="detail-panel" class="detail panel" aria-labelledby="detail-title">
+        <div class="section-title"><h2 id="detail-title" tabindex="-1">Подробности</h2><button id="back-to-row" type="button" aria-controls="rows">Обратно к списку</button></div>
+        <p id="detail-summary" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="detail-content"></div>
+      </aside>
+    </section>
+    <details class="diagnostics panel"><summary id="diagnostic-summary">Диагностика отчёта</summary><p id="diagnostic-note"></p><ul id="error-list"></ul></details>
+    <footer class="page-footer"><strong>Логический размер ≠ свободное место.</strong> Жёсткие ссылки могут учитываться повторно; фактически освобождённый объём не рассчитывается. Уровень риска — метка правила, а не разрешение на удаление.</footer>
+  </main>
+</body>
+</html>

@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keyboard detail/back navigation and predictable pagination focus.
 - Descending category bars, responsive layouts and separate empty states.
 - Search accepts both pasted Windows paths and escaped display text.
+- Promoted Atlas to the default local report preview; kept the previous viewer
+  available under `preview/legacy/` and Focus as a comparison concept.
 
 ### Security
 

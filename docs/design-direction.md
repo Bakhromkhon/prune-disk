@@ -46,7 +46,7 @@ Select a direction before replacing the primary viewer and consolidating code.
 This is a qualitative reference study, not a competitive benchmark or proof that
 Prune is superior to other products.
 
-## Acceptance before choosing
+## Pre-selection acceptance (completed)
 
 1. The visual difference must be obvious at the same desktop viewport, with the
    same demo report—not depend on changed color or font size alone.
@@ -61,12 +61,12 @@ Prune is superior to other products.
 ## Selected iteration: Atlas
 
 The user approved applying the project-local `frontend-design` skill. Atlas is
-the selected working direction; Focus remains available for comparison. This does
-not yet replace the primary report viewer.
+the primary report-preview direction; Focus remains available as an alternate
+concept. The viewer remains a local read-only web preview, not a shipped Tauri app.
 
-**Problem measured in the browser:** at 816×616 CSS px, the original Atlas overview
-occupied approximately 254 px and no complete file row was visible in the viewport.
-The next iteration must prioritize objects rather than a giant total.
+**Problem and verification:** at 816×616 CSS px the first Atlas pass used about
+254 px for its overview and showed no complete result rows. The refined pass uses
+106 px and shows three complete rows. The live viewer was also checked at 1000×700.
 
 **Composition:** compact report context above the list, category navigation on the
 left (or a compact strip), and persistent object explanation on the right. No
@@ -82,3 +82,8 @@ must be visible alongside the inspector. Text stays at least 12 CSS px; controls
 remain usable, and errors/partial status must not be hidden to achieve density.
 Actual browser geometry, screenshot availability and keyboard results must be
 reported separately from unit-test success.
+
+The structural/density acceptance is met for the fictional complete report.
+Partial reports can consume more vertical space for warnings. Screen-reader,
+200% zoom and multiple physical-device checks remain open; this is not a WCAG
+conformance claim or nontechnical-user study.
