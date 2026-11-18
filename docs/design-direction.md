@@ -57,3 +57,28 @@ Prune is superior to other products.
    overflow separately. Mark mobile/zoom/screen-reader gaps explicitly.
 5. Present both alternatives and the previous viewer for comparison. Avoid
    calling either concept finished before user evaluation.
+
+## Selected iteration: Atlas
+
+The user approved applying the project-local `frontend-design` skill. Atlas is
+the selected working direction; Focus remains available for comparison. This does
+not yet replace the primary report viewer.
+
+**Problem measured in the browser:** at 816×616 CSS px, the original Atlas overview
+occupied approximately 254 px and no complete file row was visible in the viewport.
+The next iteration must prioritize objects rather than a giant total.
+
+**Composition:** compact report context above the list, category navigation on the
+left (or a compact strip), and persistent object explanation on the right. No
+marketing hero, decorative sequence numbers or all-caps pseudo-metadata.
+
+**Visual intent:** mineral-white utility surfaces, readable graphite text and a
+forest accent reserved for selection/actions. System fonts suit familiar local
+file navigation; no external font loading is needed. Deliberate spacing and
+content hierarchy, not ornamental styling, carry the identity.
+
+**Acceptance:** at the same 816×616 viewport, at least three complete file rows
+must be visible alongside the inspector. Text stays at least 12 CSS px; controls
+remain usable, and errors/partial status must not be hidden to achieve density.
+Actual browser geometry, screenshot availability and keyboard results must be
+reported separately from unit-test success.
