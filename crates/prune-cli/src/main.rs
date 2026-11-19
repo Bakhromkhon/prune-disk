@@ -7,10 +7,12 @@ mod util;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use humansize::{DECIMAL, format_size};
 use prune_core::{
     Category, Risk, Rule, ScanControl, ScanOptions, ValidatedRuleSet, builtin_rules,
     load_rules_from_dir, scan_with_control,
 };
+use prune_history::{HistoryMode, HistoryStore, SnapshotSummary};
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 
@@ -37,6 +39,8 @@ enum Commands {
     Rules(RulesArgs),
     /// Show environment and safety information
     Doctor,
+    /// Manage explicitly saved local scan history (metadata only)
+    History(HistoryArgs),
 }
 
 #[derive(clap::Args)]
@@ -65,6 +69,30 @@ struct ScanArgs {
     /// Disable the interactive TUI
     #[arg(long)]
     no_tui: bool,
+    /// Save this scan's metadata to the local history database
+    #[arg(long)]
+    remember: bool,
+}
+
+#[derive(clap::Args)]
+struct HistoryArgs {
+    #[command(subcommand)]
+    command: HistoryCommand,
+}
+
+#[derive(Subcommand)]
+enum HistoryCommand {
+    /// List locally saved scans without creating a history database
+    List,
+    /// Compare two complete snapshots with the same local scope and filters
+    Diff { older: i64, newer: i64 },
+    /// Delete one saved metadata snapshot
+    Delete { id: i64 },
+    /// Delete all saved metadata; requires explicit confirmation
+    Clear {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -184,6 +212,7 @@ fn run() -> Result<i32> {
         }
         Commands::Rules(args) => run_rules(args).map(|()| 0),
         Commands::Doctor => run_doctor().map(|()| 0),
+        Commands::History(args) => run_history(args),
     }
 }
 
@@ -225,6 +254,14 @@ fn run_scan(args: ScanArgs) -> Result<i32> {
         scan_with_control(&options, &control, |_| {})
     };
     let exit_code = if report.cancelled { 130 } else { 0 };
+    if args.remember {
+        let mut history = HistoryStore::open_default(HistoryMode::CreateOrOpen)?
+            .context("failed to open local history")?;
+        let id = history
+            .save_report(&report)
+            .context("failed to save scan metadata to local history")?;
+        eprintln!("Saved scan #{id} to local history (metadata only).");
+    }
 
     if args.json {
         let json = if let Some(home) = home_for_redaction {
@@ -246,6 +283,158 @@ fn run_scan(args: ScanArgs) -> Result<i32> {
     }
 
     Ok(exit_code)
+}
+
+fn run_history(args: HistoryArgs) -> Result<i32> {
+    match args.command {
+        HistoryCommand::List => {
+            let Some(history) = HistoryStore::open_default(HistoryMode::ReadOnly)? else {
+                println!("No saved scans. Run `prune scan --remember` to opt in to local history.");
+                return Ok(0);
+            };
+            let scans = history.list()?;
+            if scans.is_empty() {
+                println!("No saved scans. Run `prune scan --remember` to opt in to local history.");
+            } else {
+                output_history_list(&scans);
+            }
+        }
+        HistoryCommand::Diff { older, newer } => {
+            let history = HistoryStore::open_default(HistoryMode::ReadOnly)?
+                .context("No local history database; save a scan with --remember first")?;
+            let diff = history.diff(older, newer)?;
+            output_history_diff(&diff);
+        }
+        HistoryCommand::Delete { id } => {
+            let Some(mut history) = HistoryStore::open_default(HistoryMode::ReadWrite)? else {
+                anyhow::bail!("No local history database");
+            };
+            history.delete(id)?;
+            println!("Deleted history snapshot #{id} (metadata only).");
+        }
+        HistoryCommand::Clear { yes: false } => {
+            anyhow::bail!("Clearing local history deletes saved metadata; pass --yes to confirm");
+        }
+        HistoryCommand::Clear { yes: true } => {
+            let Some(mut history) = HistoryStore::open_default(HistoryMode::ReadWrite)? else {
+                println!("No local history database.");
+                return Ok(0);
+            };
+            let removed = history.clear()?;
+            println!("Cleared {removed} local history snapshots (metadata only).");
+        }
+    }
+    Ok(0)
+}
+
+fn output_history_list(scans: &[SnapshotSummary]) {
+    println!(
+        "{:<6} {:<19} {:<10} {:<10} {:<11} FINDINGS",
+        "ID", "SCANNED (UTC)", "PLATFORM", "STATUS", "LOGICAL SIZE"
+    );
+    for scan in scans {
+        println!(
+            "{:<6} {:<19} {:<10} {:<10} {:<11} {}",
+            scan.id,
+            format_utc(scan.scanned_at),
+            util::truncate(&util::escape_terminal(&scan.platform), 10),
+            completeness_label(scan.completeness),
+            format_size(scan.total_bytes, DECIMAL),
+            scan.finding_count
+        );
+    }
+    println!(
+        "History stores local metadata and relative paths only. Maximum {} snapshots; oldest data is never removed automatically.",
+        HistoryStore::max_snapshots()
+    );
+}
+
+fn output_history_diff(diff: &prune_history::Diff) {
+    println!(
+        "Comparing complete scans #{} → #{} · {} → {}",
+        diff.older.id,
+        diff.newer.id,
+        format_utc(diff.older.scanned_at),
+        format_utc(diff.newer.scanned_at)
+    );
+    println!(
+        "Logical size change: {}{} · {} new · {} no longer observed · {} changed",
+        if diff.logical_byte_delta < 0 {
+            "−"
+        } else {
+            "+"
+        },
+        format_size(diff.logical_byte_delta.unsigned_abs() as u64, DECIMAL),
+        diff.added,
+        diff.no_longer_observed,
+        diff.changed
+    );
+    println!("This is a metadata comparison, not a deletion or free-space measurement.");
+    if diff.changes.is_empty() {
+        println!("No path or logical-size changes were observed.");
+        return;
+    }
+    println!();
+    for change in &diff.changes {
+        let (before, after) = match (change.before_bytes, change.after_bytes) {
+            (None, Some(after)) => ("—".to_string(), format_size(after, DECIMAL)),
+            (Some(before), None) => (format_size(before, DECIMAL), "—".to_string()),
+            (Some(before), Some(after)) => {
+                (format_size(before, DECIMAL), format_size(after, DECIMAL))
+            }
+            (None, None) => ("—".to_string(), "—".to_string()),
+        };
+        println!(
+            "{:<24} {}  {} → {}  {}",
+            change.kind.label(),
+            util::truncate(&util::escape_terminal(&change.rule_name), 24),
+            before,
+            after,
+            util::escape_terminal(&change.path)
+        );
+    }
+    if diff.omitted_changes > 0 {
+        println!(
+            "… and {} more changes (use a narrower scan scope to inspect fewer paths).",
+            diff.omitted_changes
+        );
+    }
+}
+
+fn format_utc(seconds: u64) -> String {
+    let Ok(seconds) = i64::try_from(seconds) else {
+        return "timestamp out of range".to_string();
+    };
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400);
+    let shifted = days.saturating_add(719_468);
+    let era = if shifted >= 0 {
+        shifted
+    } else {
+        shifted - 146_096
+    }
+    .div_euclid(146_097);
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    let hour = day_seconds / 3_600;
+    let minute = day_seconds % 3_600 / 60;
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
+}
+
+fn completeness_label(completeness: prune_core::ScanCompleteness) -> &'static str {
+    match completeness {
+        prune_core::ScanCompleteness::Complete => "полный",
+        prune_core::ScanCompleteness::Partial => "частичный",
+        prune_core::ScanCompleteness::Cancelled => "отменён",
+        prune_core::ScanCompleteness::Unknown => "неизвестный",
+    }
 }
 
 fn run_rules(args: RulesArgs) -> Result<()> {

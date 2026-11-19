@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 prune-core = { version = "0.1.0", path = "../prune-core" }
+prune-history = { version = "0.1.0", path = "../prune-history" }
 anyhow.workspace = true
 clap.workspace = true
 crossterm.workspace = true

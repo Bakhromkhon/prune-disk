@@ -13,16 +13,24 @@ may change based on real user testing and platform evidence.
 - [x] Atlas as the default local report viewer; previous viewer retained
 - [x] CI on macOS, Windows and Linux
 
-## v0.2 — Trustworthy history (still read-only)
+## v0.2 — Trustworthy local history (still read-only)
 
 - [x] Version 2 report with explicit completeness and privacy-safe scope metadata
 - [x] v1 import remains supported; missing legacy completeness is `unknown`
 - [x] Optional `--redact-home` for JSON sharing
-- [ ] User-opt-in local SQLite history of metadata only
-- [ ] Scope-aware `prune diff` for two complete, matching snapshots
-- [ ] Clear UI for history retention, deletion and path sensitivity
-- [ ] Time-to-live / stale-report labeling in Atlas (data freshness, not safety)
-- [ ] Cross-platform history migration tests and backup/recovery tests
+- [ ] `prune scan --remember`: persist only when explicitly requested
+- [ ] Extract `prune-history` local persistence behind a separate crate boundary
+- [ ] SQLite migrations, transactionally versioned; reject unsupported DB versions
+- [ ] Store metadata/findings only—no file contents; relative paths in the DB
+- [ ] Keep root identity private to the local store; never export or hash it into
+  public scope metadata
+- [ ] `prune history list` and explicit history deletion/clear controls
+- [ ] `prune diff OLD NEW`: require two complete reports, identical platform,
+  local root identity, rule digest, filters and byte-accounting semantics
+- [ ] Describe changes as “new / changed / no longer observed,” never as
+  automatically deleted or space freed
+- [ ] Fault, migration, privacy and cross-platform tests for the local store
+- [ ] Explain history location, retention and sensitivity before opt-in
 
 ## v0.3 — Explainable plans (no file changes)
 
@@ -50,6 +58,9 @@ resolution, a durable journal, crash recovery, conflict-safe undo, fault
 injection and a separate security review. A same-volume quarantine move does
 not free space. Permanent purge is distinct and irreversible. If those
 guarantees cannot be met on a platform, that platform will refuse the operation.
+
+Read-only history/diff and plan proposals are deliberately separate from this
+write gate. A successful v0.2 does not authorize file movement or deletion.
 
 ## Explicitly deferred
 
