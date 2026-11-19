@@ -53,8 +53,9 @@ fn canonical_home(home: &Path) -> Option<PathBuf> {
 }
 
 fn redact_home_in_string_for_path(text: &str, home: &Path) -> String {
-    let home = home.to_string_lossy();
-    if home.is_empty() {
+    let home = home.to_string_lossy().into_owned();
+    let home_variants = home_prefix_variants(&home);
+    if home_variants.is_empty() {
         return text.to_owned();
     }
 
@@ -62,7 +63,11 @@ fn redact_home_in_string_for_path(text: &str, home: &Path) -> String {
     let mut offset = 0;
 
     while offset < text.len() {
-        if let Some((matched_len, trailing_separator)) = match_home_prefix(&text[offset..], &home) {
+        let matched = home_variants
+            .iter()
+            .filter_map(|candidate_home| match_home_prefix(&text[offset..], candidate_home))
+            .max_by_key(|(matched_len, _)| *matched_len);
+        if let Some((matched_len, trailing_separator)) = matched {
             redacted.push('~');
             let suffix = &text[offset + matched_len..];
             if let Some(separator) = trailing_separator
@@ -88,6 +93,45 @@ fn redact_home_in_string_for_path(text: &str, home: &Path) -> String {
     }
 
     redacted
+}
+
+#[cfg(windows)]
+fn home_prefix_variants(home: &str) -> Vec<String> {
+    const VERBATIM: &str = "\\\\?\\";
+    const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
+
+    let mut variants = vec![home.to_owned()];
+    if home
+        .get(..VERBATIM_UNC.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM_UNC))
+    {
+        variants.push(format!("\\\\{}", &home[VERBATIM_UNC.len()..]));
+    } else if home
+        .get(..VERBATIM.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM))
+    {
+        variants.push(home[VERBATIM.len()..].to_owned());
+    }
+
+    let bytes = home.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && is_path_separator(home[2..].chars().next().unwrap_or_default())
+    {
+        variants.push(format!("{VERBATIM}{home}"));
+    } else if home.starts_with("\\\\") && !home.starts_with(VERBATIM) {
+        variants.push(format!("{VERBATIM_UNC}{}", &home[2..]));
+    }
+
+    variants.sort();
+    variants.dedup();
+    variants
+}
+
+#[cfg(not(windows))]
+fn home_prefix_variants(home: &str) -> Vec<String> {
+    vec![home.to_owned()]
 }
 
 fn match_home_prefix(candidate: &str, home: &str) -> Option<(usize, Option<char>)> {
@@ -279,5 +323,21 @@ mod tests {
         assert_eq!(value["slash"], "~/cache");
         assert_eq!(value["unicode_case"], "~/cache");
         assert_eq!(value["near_match"], r"C:\Users\Éxamples\cache");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_verbatim_drive_and_unc_spellings_are_redacted() {
+        let drive_home = Path::new(r"C:\Users\Alice");
+        assert_eq!(
+            redact_home_in_string(r"\\?\C:\Users\Alice\cache\item", drive_home),
+            r"~\cache\item"
+        );
+
+        let unc_home = Path::new(r"\\server\share\Alice");
+        assert_eq!(
+            redact_home_in_string(r"\\?\UNC\server\share\Alice\cache\item", unc_home),
+            r"~\cache\item"
+        );
     }
 }
