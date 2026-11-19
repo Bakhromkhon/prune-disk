@@ -103,6 +103,29 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory preview
 Imported reports stay in browser memory; do not commit reports containing personal
 paths to this repository.
 
+## Local history (opt-in)
+
+`prune scan --remember` saves a metadata snapshot in the local application data
+directory. History is off by default and stores only metadata: scan time,
+platform, scope, totals, rule identities, relative paths, sizes, file counts and
+diagnostics. It never stores file contents.
+
+```bash
+prune scan --remember
+prune history list
+prune history diff 1 2
+prune history delete 1
+prune history clear --yes
+```
+
+Diff requires two complete scans with the same platform, rules, categories, risk
+limit, minimum size and byte accounting. A path that is no longer observed is
+not a claim that it was deleted; it may simply not be covered by the current
+scan scope. `clear` requires explicit `--yes`.
+
+`prune scan --json --redact-home` can mask recognized home paths before sharing,
+but it is not anonymization. Review the output before sending it anywhere.
+
 ## Safety guarantees
 
 - **Read-only.** v0.1 has no delete code path.
