@@ -1,7 +1,7 @@
 use crate::control::{ErrorLog, Progress};
 use crate::discovery::discover;
 use crate::measurement::{measure, unix_secs};
-use crate::model::{ByteAccounting, Category, Risk, ScanReport};
+use crate::model::{ByteAccounting, Category, Finding, Risk, ScanCompleteness, ScanReport};
 use crate::rules::ValidatedRuleSet;
 use crate::{ScanControl, ScanProgress, ScanStage};
 use rayon::prelude::*;
@@ -91,20 +91,7 @@ pub fn scan_with_control(
             .cmp(&left.size_bytes)
             .then_with(|| left.path.cmp(&right.path))
     });
-    let mut total_bytes = 0_u64;
-    let mut total_files = 0_u64;
-    for finding in &findings {
-        match (
-            total_bytes.checked_add(finding.size_bytes),
-            total_files.checked_add(finding.file_count),
-        ) {
-            (Some(bytes), Some(files)) => {
-                total_bytes = bytes;
-                total_files = files;
-            }
-            _ => record_error(&mut errors, &finding.path, "scan totals overflow"),
-        }
-    }
+    let (findings, total_bytes, total_files) = aggregate_findings(findings, &mut errors);
     let cancelled = control.is_cancelled();
     progress.stage(if cancelled {
         ScanStage::Cancelled
@@ -117,19 +104,61 @@ pub fn scan_with_control(
     errors
         .errors
         .dedup_by(|a, b| a.path == b.path && a.message == b.message);
+    let partial = cancelled
+        || errors.suppressed > 0
+        || !errors.errors.is_empty()
+        || findings.iter().any(|finding| finding.partial);
+    let completeness = if cancelled {
+        ScanCompleteness::Cancelled
+    } else if partial {
+        ScanCompleteness::Partial
+    } else {
+        ScanCompleteness::Complete
+    };
     ScanReport {
-        schema_version: 1,
+        schema_version: 2,
         platform: options.os.clone(),
         scanned_at: unix_secs(Some(SystemTime::now())).unwrap_or(0),
         total_bytes,
         total_files,
-        partial: cancelled || !errors.is_empty(),
+        completeness,
+        scope: Some(options.rules.scan_scope(
+            &options.os,
+            &options.categories,
+            options.max_risk,
+            options.min_size,
+        )),
+        partial,
         cancelled,
         suppressed_errors: errors.suppressed,
         byte_accounting: ByteAccounting::Logical,
         findings,
         errors: errors.errors,
     }
+}
+
+fn aggregate_findings(findings: Vec<Finding>, errors: &mut ErrorLog) -> (Vec<Finding>, u64, u64) {
+    let mut accepted = Vec::with_capacity(findings.len());
+    let mut total_bytes = 0_u64;
+    let mut total_files = 0_u64;
+    for finding in findings {
+        match (
+            total_bytes.checked_add(finding.size_bytes),
+            total_files.checked_add(finding.file_count),
+        ) {
+            (Some(bytes), Some(files)) => {
+                total_bytes = bytes;
+                total_files = files;
+                accepted.push(finding);
+            }
+            _ => record_error(
+                errors,
+                &finding.path,
+                "scan totals overflow; finding omitted",
+            ),
+        }
+    }
+    (accepted, total_bytes, total_files)
 }
 
 pub(crate) fn record_error(errors: &mut ErrorLog, path: &Path, error: impl ToString) {
@@ -139,7 +168,7 @@ pub(crate) fn record_error(errors: &mut ErrorLog, path: &Path, error: impl ToStr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Recreate, Rule};
+    use crate::model::{PathEncoding, Recreate, Rule, ScanRootKind};
     use std::fs;
     use tempfile::tempdir;
 
@@ -172,6 +201,7 @@ mod tests {
             events.lock().unwrap().push(p);
         });
         assert!(report.cancelled && report.partial);
+        assert_eq!(report.completeness, ScanCompleteness::Cancelled);
         assert!(report.findings.is_empty());
         let events = events.into_inner().unwrap();
         assert_eq!(events.last().unwrap().stage, ScanStage::Cancelled);
@@ -200,6 +230,7 @@ mod tests {
             events.lock().unwrap().push(p);
         });
         assert!(report.cancelled && report.partial);
+        assert_eq!(report.completeness, ScanCompleteness::Cancelled);
         assert!(report.findings.is_empty());
         assert!(
             !events
@@ -229,6 +260,7 @@ mod tests {
             events.lock().unwrap().push(p);
         });
         assert!(report.cancelled && report.partial);
+        assert_eq!(report.completeness, ScanCompleteness::Cancelled);
         assert_eq!(report.total_files, 1);
         assert_eq!(report.total_bytes, 3);
         assert!(report.findings[0].partial);
@@ -267,6 +299,7 @@ mod tests {
                 |_| {},
             );
             assert!(!report.partial && !report.cancelled);
+            assert_eq!(report.completeness, ScanCompleteness::Complete);
             assert_eq!(report.total_files, 12);
             assert_eq!(report.total_bytes, 36);
         }
@@ -286,6 +319,7 @@ mod tests {
         );
         assert!(report.partial);
         assert!(!report.cancelled);
+        assert_eq!(report.completeness, ScanCompleteness::Partial);
         assert!(report.findings.is_empty());
         assert!(
             report
@@ -336,6 +370,102 @@ mod tests {
             assert!(report.findings.is_empty());
             assert!(!report.errors.is_empty());
         }
+    }
+
+    #[test]
+    fn v2_scope_records_effective_filters_without_exposing_custom_root() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_string_lossy().into_owned();
+        let mut opts = options(dir.path(), Vec::new());
+        opts.categories = vec![Category::Developer, Category::Browser, Category::Developer];
+        opts.max_risk = Some(Risk::Medium);
+        opts.min_size = 128;
+
+        let report = scan(&opts);
+        assert_eq!(report.schema_version, 2);
+        assert_eq!(report.completeness, ScanCompleteness::Complete);
+        assert!(!report.partial && !report.cancelled);
+        let scope = report.scope.as_ref().unwrap();
+        assert_eq!(scope.root_kind, ScanRootKind::Custom);
+        assert!(!scope.comparable);
+        assert_eq!(
+            scope.categories,
+            vec![Category::Browser, Category::Developer]
+        );
+        assert_eq!(scope.max_risk, Some(Risk::Medium));
+        assert_eq!(scope.min_size_bytes, 128);
+        assert!(scope.rule_set_digest.starts_with("sha256:"));
+        assert_eq!(scope.rule_set_digest.len(), 71);
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(!json.contains(&root));
+        assert!(json.contains(r#""completeness":"complete""#));
+        assert!(json.contains(r#""partial":false"#));
+        assert!(json.contains(r#""cancelled":false"#));
+
+        let mut changed_filters = opts;
+        changed_filters.categories = vec![Category::System];
+        changed_filters.max_risk = Some(Risk::Safe);
+        changed_filters.min_size = 256;
+        let changed_scope = scan(&changed_filters).scope.unwrap();
+        assert_ne!(scope, &changed_scope);
+        assert_eq!(scope.rule_set_digest, changed_scope.rule_set_digest);
+    }
+
+    #[test]
+    fn empty_scope_means_no_trusted_root_not_zero_findings() {
+        let report = scan(&ScanOptions::default());
+        assert!(report.findings.is_empty());
+        let scope = report.scope.unwrap();
+        assert_eq!(scope.root_kind, ScanRootKind::Empty);
+        assert!(!scope.comparable);
+    }
+
+    #[test]
+    fn overflowing_report_totals_omit_the_finding_that_would_break_the_invariant() {
+        fn finding(id: &str, size_bytes: u64, file_count: u64) -> Finding {
+            Finding {
+                rule_id: id.into(),
+                rule_name: id.into(),
+                category: Category::Developer,
+                risk: Risk::Safe,
+                recreate: Recreate::Automatic,
+                path: Path::new(id).to_path_buf(),
+                path_encoding: PathEncoding::Utf8,
+                size_bytes,
+                file_count,
+                last_modified: None,
+                description: String::new(),
+                byte_accounting: ByteAccounting::Logical,
+                partial: false,
+            }
+        }
+
+        let mut errors = ErrorLog::default();
+        let (findings, total_bytes, total_files) = aggregate_findings(
+            vec![
+                finding("first", u64::MAX, u64::MAX),
+                finding("overflow", 1, 1),
+            ],
+            &mut errors,
+        );
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "first");
+        assert_eq!(
+            total_bytes,
+            findings.iter().map(|f| f.size_bytes).sum::<u64>()
+        );
+        assert_eq!(
+            total_files,
+            findings.iter().map(|f| f.file_count).sum::<u64>()
+        );
+        assert!(
+            errors
+                .errors
+                .iter()
+                .any(|error| error.message.contains("overflow"))
+        );
     }
 
     #[cfg(unix)]

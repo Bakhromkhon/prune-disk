@@ -1,10 +1,14 @@
-use crate::model::Rule;
+use crate::model::{Category, Recreate, Risk, Rule, ScanRootKind, ScanScope};
 use crate::path_policy::{ValidatedPath, parse_path_pattern};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use walkdir::WalkDir;
+
+const RULE_SET_DIGEST_PREFIX: &str = "sha256:";
 
 /// Built-in rules are compiled into the binary so a fresh install has a useful
 /// rule set without any network access or extra files.
@@ -124,7 +128,20 @@ pub enum RuleError {
 #[derive(Debug, Clone)]
 pub struct ValidatedRuleSet {
     pub(crate) root: Option<PathBuf>,
+    root_kind: ScanRootKind,
     pub(crate) entries: Vec<ValidatedRule>,
+}
+
+#[derive(Serialize)]
+struct CanonicalRule<'a> {
+    id: &'a str,
+    name: &'a str,
+    description: &'a str,
+    os: Vec<&'a str>,
+    category: Category,
+    risk: Risk,
+    recreate: Recreate,
+    paths: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -138,13 +155,21 @@ impl ValidatedRuleSet {
     pub fn new(rules: Vec<Rule>) -> Result<Self, RuleError> {
         let home = dirs::home_dir()
             .ok_or_else(|| RuleError::InvalidRoot("home directory is unknown".into()))?;
-        Self::for_trusted_root(rules, home)
+        Self::for_root(rules, home, ScanRootKind::Home)
     }
 
     /// Explicitly trust a directory as the scan boundary (e.g. an isolated test
     /// fixture). The filesystem/drive root is never accepted. The caller must
     /// own this trust decision; do not derive it from untrusted rule content.
     pub fn for_trusted_root(rules: Vec<Rule>, root: impl AsRef<Path>) -> Result<Self, RuleError> {
+        Self::for_root(rules, root, ScanRootKind::Custom)
+    }
+
+    fn for_root(
+        rules: Vec<Rule>,
+        root: impl AsRef<Path>,
+        root_kind: ScanRootKind,
+    ) -> Result<Self, RuleError> {
         let supplied = root.as_ref();
         if !supplied.is_absolute() {
             return Err(RuleError::InvalidRoot("root must be absolute".into()));
@@ -176,16 +201,104 @@ impl ValidatedRuleSet {
         }
         Ok(Self {
             root: Some(root),
+            root_kind,
             entries,
         })
+    }
+
+    /// Stable SHA-256 fingerprint of the validated rules relevant to `os`,
+    /// encoded as `sha256:<64 lowercase hex characters>`. The hashed preimage
+    /// includes the `prune-rule-set-v1` domain separator.
+    ///
+    /// Rules are serialized as compact JSON after sorting rules by id and each
+    /// rule's OS names and normalized path patterns. Root paths are excluded.
+    /// Every rule for `os` is included before category/risk filters and overlap
+    /// resolution. The digest is for comparison, not a security signature.
+    pub fn rule_set_digest_for_os(&self, os: &str) -> String {
+        canonical_rule_set_digest(&self.entries, os)
+    }
+
+    pub(crate) fn scan_scope(
+        &self,
+        os: &str,
+        categories: &[Category],
+        max_risk: Option<Risk>,
+        min_size_bytes: u64,
+    ) -> ScanScope {
+        let mut categories = categories.to_vec();
+        categories.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        categories.dedup();
+
+        ScanScope {
+            root_kind: self.root_kind,
+            comparable: false,
+            categories,
+            max_risk,
+            min_size_bytes,
+            rule_set_digest: self.rule_set_digest_for_os(os),
+        }
     }
 
     pub(crate) fn empty() -> Self {
         Self {
             root: None,
+            root_kind: ScanRootKind::Empty,
             entries: Vec::new(),
         }
     }
+}
+
+fn canonical_rule_set_digest(entries: &[ValidatedRule], os: &str) -> String {
+    let mut sorted_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.rule.applies_to(os))
+        .collect();
+    sorted_entries.sort_by(|left, right| left.rule.id.cmp(&right.rule.id));
+
+    let canonical_rules: Vec<_> = sorted_entries
+        .into_iter()
+        .map(|entry| {
+            let mut os: Vec<_> = entry.rule.os.iter().map(String::as_str).collect();
+            os.sort_unstable();
+            let mut paths: Vec<_> = entry.paths.iter().map(canonical_path).collect();
+            paths.sort_unstable();
+
+            CanonicalRule {
+                id: &entry.rule.id,
+                name: &entry.rule.name,
+                description: &entry.rule.description,
+                os,
+                category: entry.rule.category,
+                risk: entry.rule.risk,
+                recreate: entry.rule.recreate,
+                paths,
+            }
+        })
+        .collect();
+
+    // CanonicalRule has a fixed field order and only contains strings, vectors,
+    // and enums, so serialization is deterministic and cannot fail.
+    let bytes = serde_json::to_vec(&canonical_rules).expect("canonical validated rules serialize");
+    let mut hasher = Sha256::new();
+    hasher.update(b"prune-rule-set-v1\0");
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut hexadecimal = String::with_capacity(RULE_SET_DIGEST_PREFIX.len() + digest.len() * 2);
+    hexadecimal.push_str(RULE_SET_DIGEST_PREFIX);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest {
+        hexadecimal.push(HEX[(byte >> 4) as usize] as char);
+        hexadecimal.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    hexadecimal
+}
+
+fn canonical_path(path: &ValidatedPath) -> String {
+    let mut canonical = path.components.join("/");
+    if path.children {
+        canonical.push_str("/*");
+    }
+    canonical
 }
 
 /// Parse and validate the rules compiled into the binary.
@@ -410,6 +523,98 @@ mod tests {
 
     fn fixture_rule() -> Rule {
         builtin_rules().unwrap().into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn validated_root_kind_and_comparability_are_explicit() {
+        let empty = ValidatedRuleSet::empty();
+        assert_eq!(empty.root_kind, ScanRootKind::Empty);
+        assert!(!empty.scan_scope("linux", &[], None, 0).comparable);
+
+        let custom_root = tempfile::tempdir().unwrap();
+        let custom = ValidatedRuleSet::for_trusted_root(vec![], custom_root.path()).unwrap();
+        assert_eq!(custom.root_kind, ScanRootKind::Custom);
+        assert!(!custom.scan_scope("linux", &[], None, 0).comparable);
+
+        if dirs::home_dir().is_some() {
+            let home = ValidatedRuleSet::new(builtin_rules().unwrap()).unwrap();
+            assert_eq!(home.root_kind, ScanRootKind::Home);
+            assert!(!home.scan_scope("macos", &[], None, 0).comparable);
+        }
+    }
+
+    #[test]
+    fn rule_set_digest_is_canonical_for_rule_os_and_path_order() {
+        let root = tempfile::tempdir().unwrap();
+        let mut alpha = fixture_rule();
+        alpha.id = "alpha".into();
+        alpha.os = vec!["macos".into(), "linux".into()];
+        alpha.paths = vec!["~/app/z-cache".into(), "~/app/a-cache".into()];
+
+        let mut beta = fixture_rule();
+        beta.id = "beta".into();
+        beta.os = vec!["linux".into()];
+        beta.paths = vec!["~/build/cache".into()];
+
+        let original =
+            ValidatedRuleSet::for_trusted_root(vec![alpha.clone(), beta.clone()], root.path())
+                .unwrap();
+
+        alpha.os.reverse();
+        alpha.paths.reverse();
+        let reordered =
+            ValidatedRuleSet::for_trusted_root(vec![beta.clone(), alpha.clone()], root.path())
+                .unwrap();
+
+        assert_eq!(
+            original.rule_set_digest_for_os("linux"),
+            reordered.rule_set_digest_for_os("linux")
+        );
+        assert!(
+            original
+                .rule_set_digest_for_os("linux")
+                .starts_with("sha256:")
+        );
+        assert_eq!(original.rule_set_digest_for_os("linux").len(), 71);
+        assert_ne!(
+            original.rule_set_digest_for_os("linux"),
+            original.rule_set_digest_for_os("windows")
+        );
+
+        alpha.description.push_str(" changed");
+        let changed = ValidatedRuleSet::for_trusted_root(vec![alpha, beta], root.path()).unwrap();
+        assert_ne!(
+            original.rule_set_digest_for_os("linux"),
+            changed.rule_set_digest_for_os("linux")
+        );
+    }
+
+    #[test]
+    fn absolute_rule_paths_are_normalized_without_hashing_the_trusted_root() {
+        let first_root = tempfile::tempdir().unwrap();
+        let second_root = tempfile::tempdir().unwrap();
+        let make_rule = |root: &Path| {
+            let mut rule = fixture_rule();
+            rule.os = vec!["linux".into()];
+            rule.paths = vec![root.join("app/cache").to_string_lossy().replace('\\', "/")];
+            rule
+        };
+
+        let first = ValidatedRuleSet::for_trusted_root(
+            vec![make_rule(first_root.path())],
+            first_root.path(),
+        )
+        .unwrap();
+        let second = ValidatedRuleSet::for_trusted_root(
+            vec![make_rule(second_root.path())],
+            second_root.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            first.rule_set_digest_for_os("linux"),
+            second.rule_set_digest_for_os("linux")
+        );
     }
 
     #[test]

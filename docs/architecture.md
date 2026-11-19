@@ -99,19 +99,37 @@ See [rule-spec.md](rule-spec.md).
 
 ### History
 
-A local SQLite database will store metadata snapshots: path, size, modification time, rule ID, and scan ID. It will not store file contents. `prune diff` will compare scans and answer "what grew?".
+A future, opt-in local SQLite database may store metadata snapshots: paths relative
+to the trusted home boundary, sizes, modification times, rule IDs and scan IDs.
+It must not store file contents, and the UI must explain that paths are sensitive
+metadata and provide a way to erase the history. JSON schema v2 now records
+completeness, effective filters and a canonical rule fingerprint without exporting
+the root path. That public scope is descriptive, not proof of root identity;
+v1 reports with missing completeness remain `unknown`. A diff must compare only
+complete reports and establish identical private root identity locally. Partial,
+cancelled, unknown or cross-root reports cannot establish that an item disappeared.
 
 ### Planner
 
-The planner will take a target ("free 50 GB") and a risk tolerance, then rank candidates by safety, size, and staleness. It will explain the trade-offs and never execute automatically in the first release.
+The first planner milestone is read-only: consume a complete report and explicit
+policy, then produce a deterministic proposal with reasons and exclusions.
+`risk` is an authored estimate, not deletion authority; `never` is always excluded.
+Any target is a logical-size estimate, not guaranteed freed space. No plan is
+executed until a separate executor passes the write-feature gates.
 
 ### Quarantine
 
-Before any deletion, files will be moved into a local quarantine directory with a write-ahead manifest. A crash during the move must be recoverable. `prune undo` will restore from the manifest without overwriting an existing destination. A same-volume quarantine move does not free disk space. Permanent purge is a separate irreversible operation; retention and any automatic purge policy require explicit user consent, not a silent default.
+Quarantine, undo and purge are conditional future features, not a commitment or
+part of the next read-only milestones. If ever implemented, they require a durable
+write-ahead journal, crash recovery, race-safe platform operations and conflict-safe
+undo. A same-volume quarantine move does not free disk space; permanent purge is
+separate and irreversible.
 
 ### GUI
 
-Tauri 2 with a React frontend. The GUI will not get direct filesystem access; it will call the core through a narrow command interface. No remote content, no CDN, strict CSP.
+Tauri 2 is a future packaging option after the report/application contract settles.
+The first GUI remains read-only and uses the same Rust application API; the
+frontend gets no direct filesystem authority. No remote content, no CDN, strict CSP.
 
 ## Cross-platform plan
 

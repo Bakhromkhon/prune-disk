@@ -5,8 +5,8 @@
   const number = value => new Intl.NumberFormat('ru-RU').format(value);
   const date = value => {
     if (value === null) return 'Не указано';
-    const d = new Date(value * 1000);
-    return Number.isNaN(d.getTime()) ? 'Вне диапазона дат' : d.toLocaleDateString('ru-RU', { timeZone: 'UTC' });
+    const d = R.dateFromSeconds(value);
+    return d ? d.toLocaleDateString('ru-RU', { timeZone: 'UTC' }) : 'Дата вне диапазона';
   };
   function node(tag, className, text) {
     const el = document.createElement(tag);
@@ -40,16 +40,40 @@
       group.append(button);
     }
   }
+  function appendReportContext(detail) {
+    const context = node('section', 'report-context');
+    context.append(node('h3', '', 'Контекст отчёта'));
+    const facts = node('dl', 'facts');
+    const completeness = R.completenessLabels[report.completeness] +
+      (report.completeness === 'unknown' ? ' — состояние не подтверждено' : '');
+    const row = node('div');
+    row.append(node('dt', '', 'Полнота отчёта'), node('dd', '', completeness));
+    facts.append(row);
+    if (report.scope) {
+      context.append(node('h4', '', 'Область сканирования'));
+      for (const [label, value] of R.scopeDetails(report.scope)) {
+        const item = node('div');
+        item.append(node('dt', '', label), node('dd', '', value));
+        facts.append(item);
+      }
+    } else {
+      context.append(node('p', 'scope-note', 'Область сканирования и сопоставимость не указаны в отчёте версии 1.'));
+    }
+    context.append(facts);
+    detail.append(context);
+  }
   function renderDetail() {
     const detail = $('detail'), f = report.findings[selected];
     detail.replaceChildren();
     $('context-index').textContent = f ? String(selected + 1).padStart(2, '0') + ' / ' + String(report.findings.length).padStart(2, '0') : '—';
+    appendReportContext(detail);
     if (!f) {
       detail.append(node('p', 'empty', 'Выберите место в списке, чтобы прочитать его контекст.'));
       return;
     }
     detail.append(node('p', 'detail-category', R.categories[f.category]), node('h3', 'detail-title', f.rule_name), node('p', 'detail-description', f.description || 'В отчёте нет описания этого места.'));
     detail.append(node('span', 'path-label', 'ПУТЬ ИЗ ОТЧЁТА'), node('code', 'path', f.path));
+    if (f.path_encoding === 'lossy_utf8') detail.append(node('p', 'path-warning', R.lossyPathWarning));
     const dl = node('dl', 'facts');
     for (const [name, value] of [
       ['Логический объём', R.formatBytes(f.size_bytes)],
@@ -73,15 +97,19 @@
     const list = $('list');
     list.replaceChildren();
     $('result-count').textContent = number(page.matches.length) + ' из ' + number(report.findings.length);
-    const maximum = Math.max(0, ...report.findings.map(f => f.size_bytes));
+    const zero = report.schema_version === 2 ? 0n : 0;
+    const maximum = report.findings.reduce((largest, f) =>
+      R.compareIntegers(f.size_bytes, largest) > 0 ? f.size_bytes : largest, zero);
     for (const f of page.items) {
       const button = node('button', 'location');
       button.type = 'button';
       button.setAttribute('aria-pressed', String(f.index === selected));
       button.setAttribute('aria-controls', 'context');
-      button.setAttribute('aria-label', R.displayText(f.rule_name) + ', ' + R.formatBytes(f.size_bytes) + '. Показать контекст');
+      button.setAttribute('aria-label', R.displayText(f.rule_name) + ', ' + R.formatBytes(f.size_bytes) + '. ' +
+        (f.path_encoding === 'lossy_utf8' ? 'Путь отображён с потерями UTF-8. ' : '') + 'Показать контекст');
       const label = node('span', 'location-label');
       label.append(node('span', 'location-title', f.rule_name), node('span', 'location-category', R.categories[f.category] + (f.partial ? ' · Неполное измерение' : '')));
+      if (f.path_encoding === 'lossy_utf8') label.append(node('span', 'path-lossy', 'Путь преобразован с потерями UTF-8'));
       label.append(node('span', 'mobile-jump', 'Контекст ↓'));
       const size = node('span', 'location-size');
       size.append(node('span', '', R.formatBytes(f.size_bytes)));

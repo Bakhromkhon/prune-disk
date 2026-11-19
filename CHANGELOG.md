@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cooperative scan cancellation and UI-independent progress snapshots.
 - A dedicated bounded worker pool per scan, capped diagnostics and identity handles.
 - Explicit cancelled status and omitted-diagnostic counts in scan reports.
+- Version 2 scan reports with explicit completeness, privacy-safe scope metadata,
+  canonical rule fingerprints and exact decimal-string encoding for large `u64`.
+- Opt-in `prune scan --json --redact-home` for JSON exports with home prefixes masked.
 - Discovery identity indexing without a retained handle per candidate on Unix;
   bounded pairwise handles on Windows and a fail-closed candidate budget.
 

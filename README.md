@@ -64,6 +64,7 @@ SIZE       RISK    CATEGORY    NAME                           PATH
 prune scan                     # TUI when stdout is a terminal
 prune scan --no-tui            # plain table, good for scripts and CI
 prune scan --json              # machine-readable report
+prune scan --json --redact-home # mask recognized home paths before sharing JSON
 prune scan --min-size 100MB    # ignore smaller findings
 prune scan --category developer
 prune scan --max-risk safe     # only safe findings

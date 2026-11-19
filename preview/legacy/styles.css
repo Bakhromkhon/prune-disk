@@ -662,6 +662,23 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.path-lossy {
+  display: block;
+  color: #813816;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.path-warning {
+  border-left: 2px solid #aa4b24;
+  color: #813816;
+  font-size: 12px;
+  line-height: 1.7;
+  padding-left: 12px;
+  overflow-wrap: anywhere;
+}
+
 dl {
   margin: var(--space) 0;
 }
@@ -699,6 +716,21 @@ dd {
 .diagnostics p, .diagnostics li {
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.diagnostics h3 {
+  font-size: 14px;
+  margin: 20px 0 8px;
+}
+
+.scan-scope {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 16px;
+}
+
+.scan-scope dd {
+  text-align: left;
 }
 
 .diagnostics li {

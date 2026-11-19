@@ -12,7 +12,10 @@ pub mod scan;
 pub use control::{
     MAX_SCAN_CANDIDATES, MAX_SCAN_ERRORS, MAX_SCAN_WORKERS, ScanControl, ScanProgress, ScanStage,
 };
-pub use model::{ByteAccounting, Category, Finding, Recreate, Risk, Rule, ScanError, ScanReport};
+pub use model::{
+    ByteAccounting, Category, Finding, PathEncoding, Recreate, Risk, Rule, ScanCompleteness,
+    ScanError, ScanReport, ScanRootKind, ScanScope,
+};
 pub use rules::{
     RuleError, ValidatedRuleSet, builtin_rules, load_rules_from_dir, validate_path_pattern,
 };

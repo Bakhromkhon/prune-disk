@@ -75,13 +75,72 @@ test('actual app: empty and cancelled reports differ; unsafe strings are literal
   assert.equal(get('clear-filters').hidden, true);
   report.cancelled = true;
   await importFile(report);
-  assert.match(get('empty-message').textContent, /В неполном отчёте/);
+  assert.match(get('empty-message').textContent, /Сканирование отменено/);
   assert.equal(get('report-state').hidden, false);
   assert.match(get('report-state').textContent, /отменено/);
   const unsafe = demo(); unsafe.findings[0].rule_name = '<img src=x onerror=alert(1)>';
   await importFile(unsafe, '<script>.json');
   assert.match(get('findings').textContent, /<img src=x/);
   assert.match(get('source-label').textContent, /<script>/);
+});
+
+test('actual app: unknown completeness is explicit and v2 scope avoids root paths', async () => {
+  const { get, demo, importFile } = setup();
+  const unknownV1 = demo();
+  delete unknownV1.partial;
+  await importFile(unknownV1, 'unknown-v1.json');
+  assert.match(get('report-state').textContent, /Полнота отчёта неизвестна/);
+  assert.doesNotMatch(get('report-state').textContent, /Неполный/);
+  assert.match(get('inspector-content').textContent, /Неизвестна/);
+
+  const v2 = demo();
+  v2.schema_version = 2;
+  delete v2.partial;
+  delete v2.cancelled;
+  v2.completeness = 'unknown';
+  v2.scope = {
+    root_kind: 'home', comparable: false, min_size_bytes: 4096,
+    categories: ['developer'], max_risk: null,
+    rule_set_digest: 'sha256:' + 'b'.repeat(64), root_path: '/private/root'
+  };
+  await importFile(v2, 'v2.json');
+  assert.match(get('inspector-content').textContent, /Домашняя папка/);
+  assert.match(get('inspector-content').textContent, /Набор правил/);
+  assert.match(get('inspector-content').textContent, /КатегорииРазработка/);
+  assert.match(get('inspector-content').textContent, /Максимальный риск \(включительно\)/);
+  assert.doesNotMatch(get('inspector-content').textContent, /\/private\/root/);
+  assert.doesNotMatch(get('inspector-content').textContent, /Сопоставимость/);
+  assert.doesNotMatch(get('report-state').textContent, /Неполный/);
+  assert.equal(get('inspector-content').children.some(node => node.tagName === 'img'), false);
+});
+
+test('actual app: v2 u64 strings render exactly and lossy paths are never presented as exact', async () => {
+  const { get, demo, importFile } = setup();
+  const base = demo().findings[0];
+  const report = demo();
+  report.schema_version = 2;
+  delete report.partial; delete report.cancelled;
+  report.completeness = 'complete';
+  report.scanned_at = '18446744073709551615';
+  report.findings = [
+    { ...base, rule_id: 'large-first', rule_name: 'Large first', path: '/example/first',
+      size_bytes: '9007199254740992', file_count: '9007199254740992', last_modified: '18446744073709551615', path_encoding: 'utf8' },
+    { ...base, rule_id: 'large-second', rule_name: 'Large second', path: '/example/second',
+      size_bytes: '9007199254740993', file_count: '9007199254740993', last_modified: '18446744073709551615', path_encoding: 'lossy_utf8' }
+  ];
+  report.total_bytes = '18014398509481985';
+  report.total_files = '18014398509481985';
+  report.suppressed_errors = '0';
+  report.scope = {
+    root_kind: 'home', comparable: false, min_size_bytes: '9007199254740993',
+    categories: ['developer'], max_risk: 'high', rule_set_digest: 'sha256:' + 'd'.repeat(64)
+  };
+  await importFile(report, 'large-v2.json');
+  assert.match(get('total').textContent, /16ПиБ/);
+  assert.match(get('scan-date').textContent, /Дата вне диапазона/);
+  assert.match(get('inspector-content').textContent, /Дата вне диапазона/);
+  assert.match(get('findings').textContent, /Путь преобразован с потерями UTF-8/);
+  assert.match(get('inspector-content').textContent, /не используйте эту строку как точный путь/);
 });
 
 test('actual app: 10,000 findings mount at most 30; page selection is visible', async () => {

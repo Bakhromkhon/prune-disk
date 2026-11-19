@@ -43,6 +43,8 @@ jobs:
         run: cargo test --locked --workspace
       - name: Build release
         run: cargo build --locked --workspace --release
+      - name: Rust JSON ↔ viewer schema contract
+        run: node scripts/check-report-contract.mjs
       - name: Fixture stress scan (2,000 candidates)
         if: runner.os != 'Windows'
         run: python3 scripts/stress-scan.py --binary target/release/prune --candidates 2000

@@ -79,6 +79,8 @@ summary { cursor: pointer; min-height: 44px; padding: 11px 8px; }
 .row-name, .row-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-name { font-weight: 600; }
 .row-path, .row-size small { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.path-lossy { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.path-warning { border-left: 4px solid var(--action); padding-left: 8px; font-size: 12px; line-height: 1.45; }
 .row-size { text-align: right; }
 .empty { padding: 16px 0; }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
@@ -91,6 +93,11 @@ summary { cursor: pointer; min-height: 44px; padding: 11px 8px; }
 .inspector-count { font-size: 12px; color: var(--text-secondary); }
 .inspector-path { background: var(--surface-subtle); padding: 8px; }
 .inspector h3 { font-size: 14px; margin: 20px 0 6px; }
+.report-context { border-bottom: 1px solid var(--border); margin-bottom: 16px; padding-bottom: 8px; }
+.report-context h3 { margin-top: 0; }
+.report-context h4 { font-size: 12px; margin: 14px 0 4px; }
+.report-context dl { margin: 8px 0; }
+.report-context dt { margin-top: 10px; }
 .inspector dl { margin: 20px 0; }
 .inspector dt { color: var(--text-secondary); font-size: 12px; margin-top: 16px; }
 .inspector dd { margin: 6px 0 0; line-height: 1.45; }

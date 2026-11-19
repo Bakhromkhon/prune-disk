@@ -9,14 +9,21 @@
     return { matches, pages, current, items: matches.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE) };
   }
   function ticks(bytes, maximum) {
+    if (typeof bytes === 'bigint' || typeof maximum === 'bigint') {
+      const size = BigInt(bytes), limit = BigInt(maximum);
+      if (!size || !limit) return 0;
+      const exactTicks = (size * 24n + limit / 2n) / limit;
+      return Number(exactTicks < 1n ? 1n : exactTicks > 24n ? 24n : exactTicks);
+    }
     if (!bytes || !maximum) return 0;
     return Math.max(1, Math.round(bytes / maximum * 24));
   }
   function warnings(report) {
     const messages = [];
-    if (report.cancelled) messages.push('Сканирование в отчёте отменено.');
-    if (report.partial) messages.push('Отчёт неполный: часть мест могла не попасть в результаты.');
-    if (report.errors.length || report.suppressed_errors) messages.push('Ошибок доступа или чтения: ' + (report.errors.length + report.suppressed_errors) + '.');
+    if (report.completeness === 'cancelled') messages.push('Сканирование отменено: результаты могут быть неполными.');
+    else if (report.completeness === 'partial') messages.push('Отчёт неполный: часть мест могла не попасть в результаты.');
+    else if (report.completeness === 'unknown') messages.push('Полнота отчёта неизвестна по данным отчёта.');
+    if (report.diagnostic_count) messages.push('Ошибок доступа или чтения: ' + new Intl.NumberFormat('ru-RU').format(report.diagnostic_count) + '.');
     return messages.join(' ');
   }
   root.FocusModel = Object.freeze({ PAGE_SIZE, page, ticks, warnings });

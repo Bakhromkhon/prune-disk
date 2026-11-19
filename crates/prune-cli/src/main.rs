@@ -1,4 +1,5 @@
 mod output;
+mod redact;
 mod scan_ui;
 mod size;
 mod tui;
@@ -46,6 +47,9 @@ struct ScanArgs {
     /// Output JSON instead of a table or TUI
     #[arg(long)]
     json: bool,
+    /// Replace home-directory prefixes with ~ in JSON output only
+    #[arg(long, requires = "json")]
+    redact_home: bool,
     /// Read rules from a directory instead of the built-in set
     #[arg(long, value_name = "DIR")]
     rules_dir: Option<PathBuf>,
@@ -145,22 +149,63 @@ fn run() -> Result<i32> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
-            if error.use_stderr() {
-                eprintln!("{}", util::escape_terminal(&error.to_string()));
+            let redact_home = raw_args_request_home_redaction();
+            let message = error.to_string();
+            let message = if redact_home {
+                if let Some(home) = dirs::home_dir().filter(|home| home.is_absolute()) {
+                    redact::redact_home_in_string(&message, &home)
+                } else {
+                    message
+                }
             } else {
-                print!("{error}");
+                message
+            };
+            if error.use_stderr() {
+                eprintln!("{}", util::escape_terminal(&message));
+            } else {
+                print!("{message}");
             }
             std::process::exit(error.exit_code());
         }
     };
     match cli.command {
-        Commands::Scan(args) => run_scan(args),
+        Commands::Scan(args) => {
+            let redact_errors = args.redact_home;
+            run_scan(args).map_err(|error| {
+                if !redact_errors {
+                    return error;
+                }
+                let Some(home) = dirs::home_dir().filter(|home| home.is_absolute()) else {
+                    return error;
+                };
+                let message = redact::redact_home_in_string(&format!("{error:#}"), &home);
+                anyhow::anyhow!("{message}")
+            })
+        }
         Commands::Rules(args) => run_rules(args).map(|()| 0),
         Commands::Doctor => run_doctor().map(|()| 0),
     }
 }
 
+fn raw_args_request_home_redaction() -> bool {
+    std::env::args_os().any(|argument| {
+        let argument = argument.to_string_lossy();
+        argument == "--redact-home" || argument.starts_with("--redact-home=")
+    })
+}
+
 fn run_scan(args: ScanArgs) -> Result<i32> {
+    let home_for_redaction = if args.redact_home {
+        Some(
+            dirs::home_dir()
+                .filter(|home| home.is_absolute())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("cannot determine an absolute home directory for --redact-home")
+                })?,
+        )
+    } else {
+        None
+    };
     let rules = load_rules(args.rules_dir.as_deref())?;
     let options = ScanOptions {
         os: std::env::consts::OS.to_string(),
@@ -182,7 +227,14 @@ fn run_scan(args: ScanArgs) -> Result<i32> {
     let exit_code = if report.cancelled { 130 } else { 0 };
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        let json = if let Some(home) = home_for_redaction {
+            let mut value = serde_json::to_value(&report)?;
+            redact::redact_home_in_json(&mut value, &home);
+            serde_json::to_string_pretty(&value)?
+        } else {
+            serde_json::to_string_pretty(&report)?
+        };
+        println!("{json}");
         return Ok(exit_code);
     }
 

@@ -1,5 +1,5 @@
 'use strict';
-const { categories, risks, recreates, MAX_BYTES, validateReport, parseReport, displayText, formatBytes, filterFindings } = PruneReport;
+const { categories, risks, recreates, MAX_BYTES, validateReport, parseReport, displayText, formatBytes, sumIntegers, compareIntegers, ratioBasisPoints, percentage, dateFromSeconds, scopeDetails, filterFindings } = PruneReport;
 // Deliberately fabricated, portable demo. No paths or data from the host machine.
 const DEMO_REPORT = {
   schema_version: 1, platform: 'macos', scanned_at: 1794902400,
@@ -28,8 +28,11 @@ function element(tag, text, className) {
 }
 function badge(risk) { return element('span', risks[risk], 'risk ' + risk); }
 function date(seconds) {
-  const d = new Date(seconds * 1000);
-  return Number.isNaN(d.getTime()) ? 'Дата вне диапазона' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeZone: 'UTC' }).format(d) + ' · UTC';
+  const d = dateFromSeconds(seconds);
+  return !d ? 'Дата вне диапазона' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeZone: 'UTC' }).format(d) + ' · UTC';
+}
+function sumSizes(findings) {
+  return sumIntegers(findings.map(f => f.size_bytes), report.schema_version === 2 ? 0n : 0);
 }
 function resetFilters() {
   $('category').value = ''; $('risk').value = ''; $('search-input').value = '';
@@ -45,21 +48,27 @@ function showReport(value, demo, filename) {
   put('total-findings', numberText(report.findings.length));
   put('total-files', numberText(report.total_files) + ' файлов в отчёте');
   put('attention', numberText(report.findings.filter(f => ['medium', 'high', 'never'].includes(f.risk)).length));
-  $('warning').hidden = !report.partial;
-  put('warning', 'По данным отчёта: ' + (report.cancelled ? 'сканирование отменено. ' : '') + 'Отчёт неполный: размеры могут быть занижены. Ошибок с описанием: ' + report.errors.length + '. Ещё ' + numberText(report.suppressed_errors) + ' ошибок без описания; подробности — в диагностике.');
+  const warningText = {
+    complete: '',
+    partial: 'Отчёт неполный: размеры могут быть занижены.',
+    cancelled: 'Сканирование отменено: результаты могут быть неполными.',
+    unknown: 'Полнота отчёта неизвестна по данным отчёта.'
+  }[report.completeness];
+  $('warning').hidden = report.completeness === 'complete';
+  put('warning', 'По данным отчёта: ' + warningText + ' Ошибок с описанием: ' + report.errors.length + '. Ещё ' + numberText(report.suppressed_errors) + ' ошибок без описания; подробности — в диагностике.');
   renderCategories(); renderRows(); renderDiagnostics();
 }
 function renderCategories() {
   const container = document.querySelector('.category-bars') || element('div', undefined, 'category-bars');
   container.replaceChildren();
   const totals = Object.entries(categories).map(([key, title]) => ({
-    key, title, sum: report.findings.filter(f => f.category === key).reduce((n, f) => n + f.size_bytes, 0)
-  })).filter(({ key }) => report.findings.some(f => f.category === key)).sort((a, b) => b.sum - a.sum);
+    key, title, sum: sumSizes(report.findings.filter(f => f.category === key))
+  })).filter(({ key }) => report.findings.some(f => f.category === key)).sort((a, b) => compareIntegers(b.sum, a.sum));
   for (const { title, sum } of totals) {
-    const percent = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(report.total_bytes ? sum / report.total_bytes * 100 : 0) + '%';
+    const percent = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(percentage(sum, report.total_bytes, 1)) + '%';
     const item = element('div'), label = element('div', undefined, 'category-label');
     label.append(element('strong', title), element('span', formatBytes(sum) + ' · ' + percent));
-    const meter = element('meter'); meter.min = 0; meter.max = report.total_bytes || 1; meter.value = sum;
+    const meter = element('meter'); meter.min = 0; meter.max = 10000; meter.value = ratioBasisPoints(sum, report.total_bytes);
     meter.setAttribute('aria-label', title + ': ' + percent + ', ' + formatBytes(sum) + ' из ' + formatBytes(report.total_bytes));
     item.append(label, meter); container.append(item);
   }
@@ -92,6 +101,7 @@ function renderRows() {
     });
     const path = element('span', f.path, 'path'); path.title = displayText(f.path);
     name.append(button, path);
+    if (f.path_encoding === 'lossy_utf8') name.append(element('span', 'Путь преобразован с потерями UTF-8', 'path-lossy'));
     if (f.partial) name.append(element('span', 'Неполное измерение', 'risk medium'));
     const jump = element('button', 'Перейти к подробностям', 'row-jump');
     jump.type = 'button';
@@ -109,9 +119,14 @@ function renderRows() {
   $('rows').replaceChildren(fragment);
   put('result-count', numberText(filtered.length));
   $('empty').hidden = filtered.length > 0;
-  put('empty', report.findings.length ? 'Нет совпадений с поиском и фильтрами. Измените условия или сбросьте фильтры.' :
-    report.partial ? 'В неполном отчёте нет расположений. Это не значит, что проверка ничего не нашла: откройте диагностику и получите новый отчёт.' :
-      'В отчёте нет расположений. Это не оценка всего компьютера: просмотрщик показывает только содержимое файла.');
+  const emptyMessage = report.completeness === 'partial' ?
+    'В неполном отчёте нет расположений. Это не значит, что проверка ничего не нашла: откройте диагностику и получите новый отчёт.' :
+    report.completeness === 'cancelled' ?
+      'Сканирование отменено; отсутствие расположений не подтверждает, что проверка ничего не нашла.' :
+      report.completeness === 'unknown' ?
+        'Полнота отчёта неизвестна. Отсутствие расположений не подтверждает, что проверка ничего не нашла.' :
+        'В отчёте нет расположений. Это не оценка всего компьютера: просмотрщик показывает только содержимое файла.';
+  put('empty', report.findings.length ? 'Нет совпадений с поиском и фильтрами. Измените условия или сбросьте фильтры.' : emptyMessage);
   $('reset-filters').hidden = !($('category').value || $('risk').value || $('search-input').value || $('sort').value !== 'size');
   $('jump-detail').disabled = selected < 0;
   $('back-to-row').disabled = selected < 0;
@@ -133,12 +148,32 @@ function renderDetail() {
     ['Изменено', f.last_modified === null ? 'Нет данных' : date(f.last_modified)],
     ['Измерение', f.partial ? 'Неполное' : 'Без отметки неполноты']
   ]) { const pair = element('div'); pair.append(element('dt', key), element('dd', value)); dl.append(pair); }
-  container.append(heading, badge(f.risk), element('div', f.path, 'detail-path'), element('p', f.description, 'detail-description'), dl,
+  container.append(heading, badge(f.risk), element('div', f.path, 'detail-path'));
+  if (f.path_encoding === 'lossy_utf8') container.append(element('p', PruneReport.lossyPathWarning, 'path-warning'));
+  container.append(element('p', f.description, 'detail-description'), dl,
     element('p', 'Это не гарантия восстановления удалённых файлов. Только просмотр: никакие файлы не изменяются. Перед любыми действиями проверьте содержимое и резервные копии.', 'detail-note'));
 }
 function renderDiagnostics() {
-  put('diagnostic-summary', 'Диагностика · ' + report.errors.length + ' ошибок · подавлено: ' + numberText(report.suppressed_errors));
-  put('diagnostic-note', 'Версия схемы: ' + report.schema_version + '. ' + (report.partial ? 'Есть неполные измерения. Для ' + numberText(report.suppressed_errors) + ' ошибок описания не записаны в файл отчёта.' : 'Отчёт не содержит отметки о неполноте. Это не гарантия безопасности удаления.'));
+  put('diagnostic-summary', 'Диагностика · всего: ' + numberText(report.diagnostic_count) + ' · описано: ' + report.errors.length + ' · подавлено: ' + numberText(report.suppressed_errors));
+  const completenessNote = {
+    complete: 'Отчёт помечен полным по данным отчёта.',
+    partial: 'Отчёт помечен как неполный.',
+    cancelled: 'Сканирование в отчёте отменено.',
+    unknown: 'Полнота отчёта неизвестна.'
+  }[report.completeness];
+  const suppressedNote = report.suppressed_errors ?
+    ' Для ' + numberText(report.suppressed_errors) + ' ошибок описания не записаны в файл отчёта.' : '';
+  const scopeNote = report.schema_version === 1 ? ' Область сканирования и сопоставимость не указаны.' : '';
+  put('diagnostic-note', 'Версия схемы: ' + report.schema_version + '. ' + completenessNote + scopeNote + suppressedNote + ' Это не гарантия безопасности удаления.');
+  const scopeHeading = $('scope-heading'), scopeList = $('scan-scope');
+  scopeList.replaceChildren();
+  scopeHeading.hidden = !report.scope;
+  scopeList.hidden = !report.scope;
+  if (report.scope) {
+    for (const [label, value] of scopeDetails(report.scope)) {
+      scopeList.append(element('dt', label), element('dd', value));
+    }
+  }
   $('error-list').replaceChildren(...report.errors.map(e => element('li', e.path + ' — ' + e.message)));
 }
 for (const [key, value] of Object.entries(categories)) $('category').append(new Option(value, key));
@@ -171,7 +206,7 @@ $('file-input').addEventListener('change', () => {
   const file = $('file-input').files[0], sequence = ++importSequence;
   $('file-input').value = '';
   if (!file) return;
-  function error(message, action = 'Выберите JSON-отчёт Prune версии 1 или получите новый отчёт через CLI.') {
+  function error(message, action = 'Выберите JSON-отчёт Prune версии 1 или 2 либо получите новый отчёт через CLI.') {
     if (sequence !== importSequence) return;
     put('import-error-message', message);
     $('import-error-detail').hidden = false;

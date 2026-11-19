@@ -175,8 +175,8 @@ test('empty complete, partial and filtered reports have distinct explanations an
   context.fixture.cancelled = true;
   context.fixture.suppressed_errors = 3;
   vm.runInContext("showReport(fixture, false, 'partial.json')", context);
-  assert.match(ids.get('empty').textContent, /В неполном отчёте/);
-  assert.match(ids.get('warning').textContent, /^По данным отчёта: сканирование отменено/);
+  assert.match(ids.get('empty').textContent, /Сканирование отменено/);
+  assert.match(ids.get('warning').textContent, /^По данным отчёта: Сканирование отменено/);
   assert.match(ids.get('warning').textContent, /3 ошибок без описания/);
   assert.match(ids.get('diagnostic-note').textContent, /Версия схемы: 1/);
   assert.match(ids.get('diagnostic-note').textContent, /3 ошибок описания не записаны/);
@@ -198,7 +198,7 @@ test('category meters descend by size, share the report denominator, and include
   const meters = bars.children.map(item => item.querySelector('meter'));
   assert.equal(meters.length, 5);
   assert.deepEqual(meters.map(meter => meter.value), [...meters.map(meter => meter.value)].sort((a, b) => b - a));
-  assert.ok(meters.every(meter => meter.max === 17490247680));
+  assert.ok(meters.every(meter => meter.max === 10000));
   assert.ok(meters.every(meter => /%/.test(meter.getAttribute('aria-label'))));
   assert.match(bars.children[0].textContent, /^Разработка/);
   assert.match(bars.children[3].textContent, /^Приложения/);
@@ -267,7 +267,7 @@ test('zero-byte categories expose zero percent without invalid meter bounds', ()
   vm.runInContext("showReport(fixture, false, 'zero.json')", context);
   const meter = bars.children[0].querySelector('meter');
   assert.equal(meter.value, 0);
-  assert.equal(meter.max, 1);
+  assert.equal(meter.max, 10000);
   assert.match(meter.getAttribute('aria-label'), /0%/);
   assert.doesNotMatch(bars.textContent, /NaN|Infinity/);
 });
@@ -289,13 +289,66 @@ test('invalid JSON retains the report, gives an action, and repeats its live ann
 
 test('schema import errors retain the existing report and keep technical names out of the primary action', () => {
   const { ids, context, readers, importFile, flushFrames } = setup();
-  const fixture = { ...context.fixture, schema_version: 2 };
+  const fixture = { ...context.fixture, schema_version: 3 };
   importFile({ name: 'unsupported.json', size: 1024, content: JSON.stringify(fixture) });
   readers.at(-1).onload();
   flushFrames();
   assert.match(ids.get('import-error-message').textContent, /schema_version/);
   assert.doesNotMatch(ids.get('import-status').textContent, /schema_version/);
   assertSelection(ids, 'Расположение 00');
+});
+
+test('v2 context is explicit, safe and independent of root identity', () => {
+  const { ids, context } = setup();
+  const fixture = { ...context.fixture, schema_version: 2 };
+  delete fixture.partial;
+  delete fixture.cancelled;
+  fixture.completeness = 'unknown';
+  fixture.scope = {
+    root_kind: 'custom', comparable: false, min_size_bytes: 0,
+    categories: ['developer'], max_risk: null,
+    rule_set_digest: 'sha256:' + 'c'.repeat(64), root_path: '/private/root'
+  };
+  context.fixture = fixture;
+  vm.runInContext("showReport(fixture, false, 'v2.json')", context);
+  assert.match(ids.get('warning').textContent, /полнота отчёта неизвестна/i);
+  assert.doesNotMatch(ids.get('warning').textContent, /отчёт неполный/i);
+  assert.match(ids.get('scan-scope').textContent, /путь не указан/);
+  assert.match(ids.get('scan-scope').textContent, /КатегорииРазработка/);
+  assert.match(ids.get('scan-scope').textContent, /Максимальный риск \(включительно\)/);
+  assert.doesNotMatch(ids.get('scan-scope').textContent, /\/private\/root/);
+  assert.doesNotMatch(ids.get('scan-scope').textContent, /Сопоставимость/);
+  assert.equal(ids.get('scan-scope').children.some(node => node.tagName === 'img'), false);
+});
+
+test('legacy view renders v2 u64 strings, bounded bars, out-of-range dates and lossy-path warnings', () => {
+  const { ids, context, bars } = setup();
+  const base = context.fixture.findings[0];
+  const fixture = { ...context.fixture, schema_version: 2, completeness: 'complete' };
+  delete fixture.partial; delete fixture.cancelled;
+  fixture.scanned_at = '18446744073709551615';
+  fixture.findings = [
+    { ...base, rule_id: 'large-first', rule_name: 'Large first', path: '/example/first',
+      size_bytes: '9007199254740992', file_count: '9007199254740992', last_modified: '18446744073709551615', path_encoding: 'lossy_utf8' },
+    { ...base, rule_id: 'large-second', rule_name: 'Large second', path: '/example/second',
+      size_bytes: '9007199254740993', file_count: '9007199254740993', last_modified: '18446744073709551615', path_encoding: 'utf8' }
+  ];
+  fixture.total_bytes = '18014398509481985';
+  fixture.total_files = '18014398509481985';
+  fixture.suppressed_errors = '0';
+  fixture.scope = {
+    root_kind: 'home', comparable: false, min_size_bytes: '9007199254740993',
+    categories: ['developer'], max_risk: 'high', rule_set_digest: 'sha256:' + 'e'.repeat(64)
+  };
+  context.fixture = fixture;
+  vm.runInContext("showReport(fixture, false, 'large-v2.json')", context);
+  assert.match(ids.get('total-bytes').textContent, /16 ПиБ/);
+  assert.match(ids.get('report-meta').textContent, /Дата вне диапазона/);
+  assert.equal(bars.children.length, 1);
+  assert.equal(bars.children[0].querySelector('meter').max, 10000);
+  assert.match(ids.get('rows').textContent, /Путь преобразован с потерями UTF-8/);
+  assert.match(ids.get('detail-content').textContent, /не используйте эту строку как точный путь/);
+  assert.match(ids.get('detail-content').textContent, /Дата вне диапазона/);
 });
 
 test('import read and size failures give specific next steps; technical details remain literal text', () => {

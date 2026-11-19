@@ -2,7 +2,7 @@
 
 ## Short version
 
-Prune has **no telemetry**, **no accounts**, **no ads**, and **no network code** in its core. It reads file metadata locally, prints the result locally, and nothing leaves your machine unless you explicitly export or copy it.
+Prune has **no telemetry**, **no accounts**, and **no ads**. Source review found no intentional network functionality; static dependency/source checks are heuristics, not proof of runtime network isolation. It reads metadata locally, prints results locally, and nothing leaves your machine unless you explicitly export or copy it.
 
 ## What v0.1 reads
 
@@ -49,6 +49,15 @@ We have no plans to add analytics or telemetry.
 ## Exporting data
 
 `prune scan --json` writes a report to stdout. Paths can contain your username and other personal information. Treat exported reports as you would treat a screenshot of your filesystem.
+
+For sharing, `prune scan --json --redact-home` replaces recognized home-directory
+prefixes with `~` in JSON string values. This is **path masking, not anonymization**:
+filenames, rule descriptions, errors, and other values may still identify you.
+Review the output before sharing it. Without the option, JSON output remains
+unchanged for compatibility.
+
+See [report-schema.md](report-schema.md) for schema versions, completeness and
+scope semantics.
 
 ## Contact
 

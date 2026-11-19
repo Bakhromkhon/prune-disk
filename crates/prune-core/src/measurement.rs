@@ -1,6 +1,6 @@
 //! Best-effort logical byte measurement; not allocated/reclaimable space.
 use crate::control::{ErrorLog, Progress};
-use crate::model::{ByteAccounting, Finding, Rule};
+use crate::model::{ByteAccounting, Finding, PathEncoding, Rule};
 use crate::path_policy::checked_metadata;
 use crate::scan::record_error;
 use std::fs;
@@ -104,6 +104,11 @@ pub(crate) fn measure(
         risk: rule.risk,
         recreate: rule.recreate,
         path: path.to_path_buf(),
+        path_encoding: if path.to_str().is_some() {
+            PathEncoding::Utf8
+        } else {
+            PathEncoding::LossyUtf8
+        },
         size_bytes,
         file_count,
         last_modified: newest,

@@ -5,8 +5,8 @@
   const $ = id => document.getElementById(id);
   const number = value => new Intl.NumberFormat('ru-RU').format(value);
   const date = value => {
-    const d = new Date(value * 1000);
-    return Number.isNaN(d.getTime()) ? 'Дата вне диапазона' : d.toLocaleDateString('ru-RU');
+    const d = R.dateFromSeconds(value);
+    return d ? d.toLocaleDateString('ru-RU') : 'Дата вне диапазона';
   };
   const text = (node, value) => { node.textContent = R.displayText(value); };
   function element(tag, value, className) {
@@ -29,11 +29,14 @@
   for (const [key, label] of Object.entries(R.risks)) {
     const option = element('option', label); option.value = key; $('risk').append(option);
   }
+  function sumSizes(findings) {
+    return R.sumIntegers(findings.map(f => f.size_bytes), report.schema_version === 2 ? 0n : 0);
+  }
   function groups() {
     return Object.entries(R.categories).map(([key, label]) => {
       const items = report.findings.filter(f => f.category === key);
-      return { key, label, count: items.length, bytes: items.reduce((n, f) => n + f.size_bytes, 0) };
-    }).filter(group => group.count).sort((a, b) => b.bytes - a.bytes);
+      return { key, label, count: items.length, bytes: sumSizes(items) };
+    }).filter(group => group.count).sort((a, b) => R.compareIntegers(b.bytes, a.bytes));
   }
   function chooseCategory(key) {
     const origin = document.activeElement.parentElement?.id;
@@ -61,13 +64,12 @@
     $('ribbon').replaceChildren();
     for (const group of groups()) {
       if (!group.bytes) continue;
-      const share = group.bytes / report.total_bytes;
       const segment = element('span');
-      segment.style.flexGrow = String(group.bytes);
+      segment.style.flexGrow = String(R.ratioBasisPoints(group.bytes, report.total_bytes));
       segment.style.flexBasis = '0px';
       segment.setAttribute('aria-hidden', 'true');
       if (group.key === category) segment.className = 'active-share';
-      segment.title = group.label + ': ' + Math.round(share * 100) + '%';
+      segment.title = group.label + ': ' + R.percentage(group.bytes, report.total_bytes) + '%';
       $('ribbon').append(segment);
     }
     if (!report.total_bytes) $('ribbon').append(element('span', 'Нет объёма для распределения'));
@@ -78,15 +80,27 @@
     const separator = formatted.lastIndexOf(' ');
     $('total').replaceChildren(document.createTextNode(formatted.slice(0, separator)), element('span', formatted.slice(separator + 1)));
     text($('total-context'), number(report.total_bytes) + ' Б · ' + number(report.total_files) + ' файлов · ' + report.findings.length + ' записей');
-    $('report-state').hidden = !report.cancelled && !report.partial;
+    $('report-state').hidden = report.completeness === 'complete';
     $('report-state').className = 'state warning';
-    text($('report-state'), report.cancelled ? 'Сканирование отменено. Показана только часть данных.' : 'Неполный отчёт: объём может быть занижен.');
+    const stateMessage = {
+      complete: '',
+      partial: 'Неполный отчёт: объём может быть занижен.',
+      cancelled: 'Сканирование отменено. Результаты могут быть неполными.',
+      unknown: 'Полнота отчёта неизвестна: нельзя считать результат ни полным, ни неполным.'
+    }[report.completeness];
+    text($('report-state'), stateMessage);
     const largest = groups()[0];
-    text($('dominant-category'), largest && report.total_bytes ? largest.label + ' · ' + Math.round(largest.bytes / report.total_bytes * 100) + '% объёма' : 'Категории без объёма');
-    text($('safety-note'), (report.cancelled ? 'Сканирование было отменено. ' : '') + (report.partial ? 'Данные неполные; показаны только полученные записи. ' : '') + 'Логический размер, не освобождаемое место. Сумма не учитывает совместные блоки, сжатие и снимки.');
+    text($('dominant-category'), largest && report.total_bytes ? largest.label + ' · ' + R.percentage(largest.bytes, report.total_bytes) + '% объёма' : 'Категории без объёма');
+    const completenessNote = {
+      complete: '',
+      partial: 'Данные неполные; показаны только полученные записи. ',
+      cancelled: 'Сканирование отменено; результаты могут быть частичными. ',
+      unknown: 'Полнота отчёта неизвестна; отсутствие записей не доказывает, что подходящих файлов нет. '
+    }[report.completeness];
+    text($('safety-note'), completenessNote + 'Логический размер, не освобождаемое место. Сумма не учитывает совместные блоки, сжатие и снимки.');
     text($('platform'), report.platform);
     text($('scan-date'), date(report.scanned_at));
-    const count = report.errors.length + report.suppressed_errors;
+    const count = report.diagnostic_count;
     $('report-errors').hidden = !count;
     text($('error-summary'), 'Ошибки доступа и чтения: ' + number(count));
     $('error-list').replaceChildren();
@@ -97,7 +111,7 @@
     rows = R.filterFindings(report.findings, { category, risk: $('risk').value, query: $('search').value, sort: $('sort').value });
     if (!rows.some(f => f.index === selected)) selected = rows.length ? rows[0].index : null;
     text($('results-title'), category ? R.categories[category] : 'Все категории');
-    text($('result-count'), rows.length + ' из ' + report.findings.length + ' записей · ' + R.formatBytes(rows.reduce((n, f) => n + f.size_bytes, 0)));
+    text($('result-count'), rows.length + ' из ' + report.findings.length + ' записей · ' + R.formatBytes(sumSizes(rows)));
     $('findings').replaceChildren();
     page = Math.min(page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1));
     const visible = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -109,6 +123,7 @@
       button.setAttribute('aria-controls', 'inspector');
       const name = element('span');
       name.append(element('span', finding.rule_name, 'row-name'), element('span', finding.path, 'row-path'));
+      if (finding.path_encoding === 'lossy_utf8') name.append(element('small', 'Путь преобразован с потерями UTF-8', 'path-lossy'));
       const size = element('span', R.formatBytes(finding.size_bytes), 'row-size');
       size.append(element('small', R.risks[finding.risk] + (finding.partial ? ' · неполно' : '')));
       button.append(name, size);
@@ -122,7 +137,7 @@
     });
     $('empty').hidden = rows.length > 0;
     const hasFindings = report.findings.length > 0;
-    text($('empty-message'), hasFindings ? 'По этим условиям ничего не найдено. Измените поиск, риск или категорию.' : report.partial || report.cancelled ? 'В неполном отчёте нет записей. Это не значит, что файлов нет. Откройте другой отчёт.' : 'В этом отчёте нет записей. Чтобы посмотреть другие данные, откройте другой отчёт.');
+    text($('empty-message'), hasFindings ? 'По этим условиям ничего не найдено. Измените поиск, риск или категорию.' : emptyReportMessage());
     $('clear-filters').hidden = !hasFindings;
     $('pagination').hidden = rows.length <= PAGE_SIZE;
     $('previous-page').disabled = page === 0;
@@ -138,12 +153,14 @@
     text($('selection-status'), current ? 'Выбрано: ' + current.rule_name : 'Запись не выбрана.');
     if (selected === null) {
       const title = element('h2', report.findings.length ? 'Ничего не выбрано' : 'Нет записей для просмотра'); title.id = 'inspector-title';
-      target.append(title, element('p', report.findings.length ? 'Измените фильтры, чтобы увидеть запись.' : report.partial || report.cancelled ? 'Получена только часть данных. Откройте другой отчёт.' : 'Откройте другой отчёт или вернитесь к демо.', 'inspector-description'));
+      target.append(title, element('p', report.findings.length ? 'Измените фильтры, чтобы увидеть запись.' : emptyReportMessage(), 'inspector-description'));
+      appendReportContext(target);
       return;
     }
     const f = report.findings[selected];
     const title = element('h2', f.rule_name); title.id = 'inspector-title';
     target.append(title, element('p', R.formatBytes(f.size_bytes), 'inspector-size'), element('p', number(f.size_bytes) + ' Б · ' + number(f.file_count) + ' файлов', 'inspector-count'), element('p', f.path, 'inspector-path'));
+    if (f.path_encoding === 'lossy_utf8') target.append(element('p', R.lossyPathWarning, 'path-warning'));
     target.append(element('h3', 'Что это'), element('p', f.description, 'inspector-description'));
     target.append(element('h3', 'Риск · ' + R.risks[f.risk]), element('p', riskAdvice[f.risk], 'inspector-description'));
     const dl = element('dl');
@@ -155,6 +172,29 @@
     ];
     for (const [label, value] of pairs) dl.append(element('dt', label), element('dd', value));
     target.append(dl);
+    appendReportContext(target);
+  }
+  function emptyReportMessage() {
+    if (report.completeness === 'cancelled') return 'Сканирование отменено; отсутствие записей не означает, что подходящих файлов нет.';
+    if (report.completeness === 'partial') return 'В неполном отчёте нет записей. Это не значит, что файлов нет. Откройте другой отчёт.';
+    if (report.completeness === 'unknown') return 'Полнота отчёта неизвестна. Отсутствие записей не подтверждает, что проверка ничего не нашла.';
+    return 'В этом отчёте нет записей. Чтобы посмотреть другие данные, откройте другой отчёт.';
+  }
+  function appendReportContext(target) {
+    const context = element('section', undefined, 'report-context');
+    context.append(element('h3', 'Контекст отчёта'));
+    const dl = element('dl');
+    dl.append(element('dt', 'Полнота отчёта'), element('dd', R.completenessLabels[report.completeness] + (report.completeness === 'unknown' ? ' — состояние не подтверждено' : '')));
+    context.append(dl);
+    if (report.scope) {
+      context.append(element('h4', 'Область сканирования'));
+      const scope = element('dl');
+      for (const [label, value] of R.scopeDetails(report.scope)) scope.append(element('dt', label), element('dd', value));
+      context.append(scope);
+    } else {
+      context.append(element('p', 'Область сканирования и сопоставимость не указаны в отчёте версии 1.', 'inspector-description'));
+    }
+    target.append(context);
   }
   function resetFilters() {
     category = ''; page = 0; $('search').value = ''; $('risk').value = ''; $('sort').value = 'size';
