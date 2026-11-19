@@ -1,4 +1,6 @@
-use prune_core::{ByteAccounting, Finding, PathEncoding, ScanCompleteness, ScanReport, ScanRootKind};
+use prune_core::{
+    ByteAccounting, Finding, PathEncoding, ScanCompleteness, ScanReport, ScanRootKind,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
