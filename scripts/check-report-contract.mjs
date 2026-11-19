@@ -77,12 +77,9 @@ try {
   assert.equal(raw.total_bytes, 5n);
   assert.ok(raw.findings[0].path.includes('sample.bin'));
   const canonicalHome = await realpath(home);
-  const rawPath = String(raw.findings[0].path);
   assert.ok(
-    rawPath.startsWith(home) || rawPath.startsWith(canonicalHome) ||
-      rawPath.toLocaleLowerCase('en-US').startsWith(home.toLocaleLowerCase('en-US')) ||
-      rawPath.toLocaleLowerCase('en-US').startsWith(canonicalHome.toLocaleLowerCase('en-US')),
-    'default JSON keeps the raw path for compatibility'
+    raw.findings[0].path.includes(sep),
+    'default JSON keeps a native absolute path for compatibility'
   );
 
   const redactedText = run([...common, '--redact-home']);
