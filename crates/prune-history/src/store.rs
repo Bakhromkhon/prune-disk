@@ -640,7 +640,11 @@ fn relative_finding_path(
         return Err(HistoryError::PathOutsideHome);
     }
     let key = path_key(relative);
-    let display = relative.to_string_lossy().into_owned();
+    let display = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
     let encoding = if relative.to_str().is_some() {
         "utf8"
     } else {
