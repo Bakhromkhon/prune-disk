@@ -1,5 +1,6 @@
 //! UI-independent cooperative cancellation and serialized progress snapshots.
 use crate::model::ScanError;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{
     Arc, Mutex,
@@ -57,7 +58,8 @@ impl ScanControl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScanStage {
     Discovering,
     Measuring,
@@ -67,7 +69,7 @@ pub enum ScanStage {
 
 /// Observed work, not a percentage or reclaimable space. File/byte counters
 /// include work below min_size and can exceed the filtered report totals.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ScanProgress {
     pub stage: ScanStage,
     /// Discovery patterns and wildcard children attempted, before deduplication.
