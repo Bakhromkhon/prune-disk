@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use humansize::{DECIMAL, format_size};
 use prune_core::{
-    Category, Risk, Rule, ScanControl, ScanOptions, ValidatedRuleSet, builtin_rules,
+    Category, Risk, Rule, ScanControl, ScanOptions, ValidatedRuleSet, build_plan, builtin_rules,
     load_rules_from_dir, scan_with_control,
 };
 use prune_history::{HistoryMode, HistoryStore, SnapshotSummary};
@@ -41,6 +41,8 @@ enum Commands {
     Doctor,
     /// Manage explicitly saved local scan history (metadata only)
     History(HistoryArgs),
+    /// Build a read-only cleanup proposal from a scan (no files are changed)
+    Plan(PlanArgs),
 }
 
 #[derive(clap::Args)]
@@ -72,6 +74,37 @@ struct ScanArgs {
     /// Save this scan's metadata to the local history database
     #[arg(long)]
     remember: bool,
+}
+
+#[derive(clap::Args)]
+struct PlanArgs {
+    /// Read a JSON scan report instead of scanning now
+    #[arg(long, value_name = "FILE")]
+    report: Option<PathBuf>,
+    /// Maximum scan workers (1..=16)
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=16))]
+    workers: u8,
+    /// Output the plan as JSON
+    #[arg(long)]
+    json: bool,
+    /// Replace home-directory prefixes with ~ in JSON output only
+    #[arg(long, requires = "json")]
+    redact_home: bool,
+    /// Read rules from a directory instead of the built-in set
+    #[arg(long, value_name = "DIR")]
+    rules_dir: Option<PathBuf>,
+    /// Only show findings at least this large (for example 100MB)
+    #[arg(long, default_value = "0", value_parser = size::parse_size)]
+    min_size: u64,
+    /// Filter by category
+    #[arg(long, value_enum)]
+    category: Option<CategoryArg>,
+    /// Only include rules at or below this risk level
+    #[arg(long, value_enum)]
+    max_risk: Option<RiskArg>,
+    /// Disable the interactive TUI
+    #[arg(long)]
+    no_tui: bool,
 }
 
 #[derive(clap::Args)]
@@ -213,6 +246,7 @@ fn run() -> Result<i32> {
         Commands::Rules(args) => run_rules(args).map(|()| 0),
         Commands::Doctor => run_doctor().map(|()| 0),
         Commands::History(args) => run_history(args),
+        Commands::Plan(args) => run_plan(args),
     }
 }
 
@@ -435,6 +469,165 @@ fn completeness_label(completeness: prune_core::ScanCompleteness) -> &'static st
         prune_core::ScanCompleteness::Cancelled => "отменён",
         prune_core::ScanCompleteness::Unknown => "неизвестный",
     }
+}
+
+fn run_plan(args: PlanArgs) -> Result<i32> {
+    let report = if let Some(path) = args.report.as_deref() {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read scan report {}", path.display()))?;
+        serde_json::from_str(&text).context("invalid scan report JSON")?
+    } else {
+        let home_for_redaction = if args.redact_home {
+            Some(
+                dirs::home_dir()
+                    .filter(|home| home.is_absolute())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "cannot determine an absolute home directory for --redact-home"
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        let _ = home_for_redaction;
+        let rules = load_rules(args.rules_dir.as_deref())?;
+        let options = ScanOptions {
+            os: std::env::consts::OS.to_string(),
+            rules: ValidatedRuleSet::new(rules).context("invalid scan rules")?,
+            min_size: args.min_size,
+            categories: args
+                .category
+                .map(|category| vec![category.into()])
+                .unwrap_or_default(),
+            max_risk: args.max_risk.map(Into::into),
+        };
+        let control = ScanControl::default().with_worker_count(usize::from(args.workers));
+        if !args.json && io::stderr().is_terminal() && io::stdin().is_terminal() && !args.no_tui {
+            scan_ui::run(&options, &control)?
+        } else {
+            scan_with_control(&options, &control, |_| {})
+        }
+    };
+
+    let plan = build_plan(&report);
+    if args.json {
+        let mut value = serde_json::to_value(&plan).context("failed to serialize plan")?;
+        if args.redact_home {
+            let home = dirs::home_dir()
+                .filter(|home| home.is_absolute())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("cannot determine an absolute home directory for --redact-home")
+                })?;
+            redact::redact_home_in_json(&mut value, &home);
+        }
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        print_plan(&plan);
+    }
+
+    if report.cancelled { Ok(130) } else { Ok(0) }
+}
+
+fn print_plan(plan: &prune_core::CleanupPlan) {
+    println!("Prune plan — read-only proposal");
+    println!(
+        "Platform: {} · Completeness: {} · Proposed: {} · Excluded: {}",
+        util::escape_terminal(&plan.platform),
+        plan.completeness.as_str(),
+        plan.proposed_count,
+        plan.excluded_count
+    );
+    println!(
+        "Proposed logical size: {} · Excluded: {} · Report total: {}",
+        format_size(plan.proposed_bytes, DECIMAL),
+        format_size(plan.excluded_bytes, DECIMAL),
+        format_size(plan.report_total_bytes, DECIMAL)
+    );
+    println!("Logical sizes are estimates, not guaranteed reclaimable space.");
+    if plan.requires_review_count > 0 {
+        println!(
+            "Items requiring explicit review: {}",
+            plan.requires_review_count
+        );
+    }
+    if !plan.warnings.is_empty() {
+        println!("Warnings:");
+        for warning in &plan.warnings {
+            println!("  {}", util::escape_terminal(warning));
+        }
+    }
+    println!();
+
+    if plan.items.is_empty() {
+        println!("No findings matched the scanned rules.");
+        return;
+    }
+
+    let proposed: Vec<_> = plan.items.iter().filter(|item| item.proposed).collect();
+    let excluded: Vec<_> = plan.items.iter().filter(|item| !item.proposed).collect();
+
+    if !proposed.is_empty() {
+        println!("Proposed:");
+        println!(
+            "{:<10} {:<7} {:<11} {:<30} PATH",
+            "SIZE", "RISK", "CATEGORY", "NAME"
+        );
+        for item in proposed {
+            println!(
+                "{:<10} {:<7} {:<11} {:<30} {}",
+                format_size(item.size_bytes, DECIMAL),
+                item.risk.as_str(),
+                item.category.as_str(),
+                util::truncate(&util::escape_terminal(&item.rule_name), 30),
+                util::display_path(&item.path)
+            );
+            println!(
+                "  reason: {}{}",
+                util::escape_terminal(&item.reason),
+                if item.requires_review {
+                    " (requires explicit review)"
+                } else {
+                    ""
+                }
+            );
+            if !item.uncertainty.is_empty() {
+                println!(
+                    "  uncertainty: {}",
+                    util::escape_terminal(&item.uncertainty.join("; "))
+                );
+            }
+        }
+        println!();
+    }
+
+    if !excluded.is_empty() {
+        println!("Excluded:");
+        println!(
+            "{:<10} {:<7} {:<11} {:<30} PATH",
+            "SIZE", "RISK", "CATEGORY", "NAME"
+        );
+        for item in excluded {
+            println!(
+                "{:<10} {:<7} {:<11} {:<30} {}",
+                format_size(item.size_bytes, DECIMAL),
+                item.risk.as_str(),
+                item.category.as_str(),
+                util::truncate(&util::escape_terminal(&item.rule_name), 30),
+                util::display_path(&item.path)
+            );
+            println!("  reason: {}", util::escape_terminal(&item.reason));
+            if !item.uncertainty.is_empty() {
+                println!(
+                    "  uncertainty: {}",
+                    util::escape_terminal(&item.uncertainty.join("; "))
+                );
+            }
+        }
+        println!();
+    }
+
+    println!("This is a proposal only. No files were changed.");
 }
 
 fn run_rules(args: RulesArgs) -> Result<()> {

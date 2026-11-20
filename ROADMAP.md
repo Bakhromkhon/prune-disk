@@ -34,10 +34,10 @@ may change based on real user testing and platform evidence.
 
 ## v0.3 — Explainable plans (no file changes)
 
-- [ ] Deterministic, side-effect-free `prune plan`
-- [ ] Show reasons, exclusions, risk and uncertainty for every proposed item
-- [ ] Report logical-size estimates, never guaranteed reclaimed bytes
-- [ ] Plan can be inspected/exported but not executed
+- [x] Deterministic, side-effect-free `prune plan`
+- [x] Show reasons, exclusions, risk and uncertainty for every proposed item
+- [x] Report logical-size estimates, never guaranteed reclaimed bytes
+- [x] Plan can be inspected/exported but not executed
 - [ ] Stable application/progress contract before a Tauri GUI
 - [ ] User testing with people who do not use a terminal
 

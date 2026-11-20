@@ -7,7 +7,7 @@ use std::path::PathBuf;
 const JS_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
 const RULE_SET_DIGEST_PREFIX: &str = "sha256:";
 
-mod js_safe_u64 {
+pub(crate) mod js_safe_u64 {
     use super::{JS_SAFE_INTEGER_MAX, Visitor};
     use serde::{Deserializer, Serializer, de::Error};
     use std::fmt;
@@ -69,7 +69,7 @@ mod js_safe_u64 {
     }
 }
 
-mod js_safe_option_u64 {
+pub(crate) mod js_safe_option_u64 {
     use super::JS_SAFE_INTEGER_MAX;
     use serde::de::Error;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -137,7 +137,7 @@ mod js_safe_timestamp {
     }
 }
 
-mod display_path {
+pub(crate) mod display_path {
     use serde::{Deserialize, Deserializer, Serializer};
     use std::path::{Path, PathBuf};
 
@@ -314,7 +314,7 @@ pub enum PathEncoding {
 }
 
 impl PathEncoding {
-    const fn is_utf8(&self) -> bool {
+    pub(crate) const fn is_utf8(&self) -> bool {
         matches!(self, Self::Utf8)
     }
 }
