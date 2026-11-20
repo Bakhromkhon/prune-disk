@@ -38,7 +38,7 @@ may change based on real user testing and platform evidence.
 - [x] Show reasons, exclusions, risk and uncertainty for every proposed item
 - [x] Report logical-size estimates, never guaranteed reclaimed bytes
 - [x] Plan can be inspected/exported but not executed
-- [ ] Stable application/progress contract before a Tauri GUI
+- [x] Stable application/progress contract before a Tauri GUI
 - [ ] User testing with people who do not use a terminal
 
 ## v0.4 — Desktop preview and platform coverage
