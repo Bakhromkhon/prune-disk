@@ -79,7 +79,11 @@ fn scans_a_fixture_and_returns_json() {
 
     let json: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
     assert_eq!(json["schema_version"], 2);
-    assert_eq!(json["completeness"], "complete");
+    assert_eq!(
+        json["completeness"], "complete",
+        "errors={:?}",
+        json["errors"]
+    );
     assert_eq!(json["scope"]["root_kind"], "home");
     assert_eq!(json["scope"]["comparable"], false);
     assert_eq!(json["scope"]["min_size_bytes"], 0);
