@@ -303,10 +303,7 @@ fn scan_remember_and_history_commands_are_local_and_explicit() {
 
     let rules_dir = root.path().join("rules");
     std::fs::create_dir_all(&rules_dir).expect("rules directory");
-    let path = format!(
-        "{}/cache/*",
-        home.to_string_lossy().replace('\\', "/")
-    );
+    let path = format!("{}/cache/*", home.to_string_lossy().replace('\\', "/"));
     let rule = format!(
         "id = \"fixture\"\nname = \"Fixture\"\ndescription = \"Fixture rule\"\nos = [\"{}\"]\ncategory = \"developer\"\nrisk = \"safe\"\nrecreate = \"automatic\"\npaths = [\"{}\"]\n",
         std::env::consts::OS,
