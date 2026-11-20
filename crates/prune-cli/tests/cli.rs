@@ -293,3 +293,105 @@ fn assert_no_home_in_string_leaves(value: &serde_json::Value, home_forms: &[&str
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
     }
 }
+
+#[test]
+fn scan_remember_and_history_commands_are_local_and_explicit() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let home = root.path().join("home");
+    std::fs::create_dir_all(home.join("cache")).expect("cache directory");
+    std::fs::write(home.join("cache/a.bin"), b"12345").expect("fixture file");
+
+    let rules_dir = root.path().join("rules");
+    std::fs::create_dir_all(&rules_dir).expect("rules directory");
+    let path = format!(
+        "{}/cache/*",
+        home.to_string_lossy().replace('\\', "/")
+    );
+    let rule = format!(
+        "id = \"fixture\"\nname = \"Fixture\"\ndescription = \"Fixture rule\"\nos = [\"{}\"]\ncategory = \"developer\"\nrisk = \"safe\"\nrecreate = \"automatic\"\npaths = [\"{}\"]\n",
+        std::env::consts::OS,
+        path
+    );
+    std::fs::write(rules_dir.join("fixture.toml"), rule).expect("rule file");
+
+    let run_scan = |size: &[u8]| {
+        std::fs::write(home.join("cache/a.bin"), size).expect("fixture file");
+        let mut cmd = Command::cargo_bin("prune").expect("prune binary");
+        cmd.env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+            .env("APPDATA", home.join("AppData").join("Roaming"))
+            .args([
+                "scan",
+                "--rules-dir",
+                rules_dir.to_str().expect("utf-8 rules dir"),
+                "--json",
+                "--no-tui",
+                "--workers",
+                "1",
+                "--remember",
+            ]);
+        cmd.assert().success().get_output().to_owned()
+    };
+
+    let first = run_scan(b"12345");
+    assert!(String::from_utf8_lossy(&first.stderr).contains("Saved scan #1"));
+
+    let second = run_scan(b"1234567890");
+    assert!(String::from_utf8_lossy(&second.stderr).contains("Saved scan #2"));
+
+    let mut list = Command::cargo_bin("prune").expect("prune binary");
+    list.env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+        .env("APPDATA", home.join("AppData").join("Roaming"))
+        .args(["history", "list"]);
+    let list_output = String::from_utf8(list.assert().success().get_output().stdout.clone())
+        .expect("utf-8 history list");
+    assert!(list_output.contains("1"));
+    assert!(list_output.contains("2"));
+
+    let mut diff = Command::cargo_bin("prune").expect("prune binary");
+    diff.env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+        .env("APPDATA", home.join("AppData").join("Roaming"))
+        .args(["history", "diff", "1", "2"]);
+    let diff_output = String::from_utf8(diff.assert().success().get_output().stdout.clone())
+        .expect("utf-8 history diff");
+    assert!(
+        diff_output.contains("no longer observed")
+            || diff_output.contains("changed")
+            || diff_output.contains("new")
+    );
+
+    Command::cargo_bin("prune")
+        .expect("prune binary")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+        .env("APPDATA", home.join("AppData").join("Roaming"))
+        .args(["history", "delete", "1"])
+        .assert()
+        .success();
+
+    Command::cargo_bin("prune")
+        .expect("prune binary")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+        .env("APPDATA", home.join("AppData").join("Roaming"))
+        .args(["history", "clear"])
+        .assert()
+        .failure();
+
+    Command::cargo_bin("prune")
+        .expect("prune binary")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+        .env("APPDATA", home.join("AppData").join("Roaming"))
+        .args(["history", "clear", "--yes"])
+        .assert()
+        .success();
+}
