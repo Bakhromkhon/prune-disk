@@ -197,7 +197,11 @@ impl HistoryStore {
     /// The platform's local application-data location. Merely asking for this
     /// path does not create it.
     pub fn default_database_path() -> Result<PathBuf, HistoryError> {
-        let root = dirs::data_local_dir().ok_or(HistoryError::DataDirectoryUnavailable)?;
+        let root = dirs::data_local_dir()
+            .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+            .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+            .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("share")))
+            .ok_or(HistoryError::DataDirectoryUnavailable)?;
         Ok(root.join("Prune").join("history.sqlite3"))
     }
 
@@ -488,7 +492,11 @@ impl HistoryStore {
 }
 
 pub fn default_history_path() -> Result<PathBuf, HistoryError> {
-    let root = dirs::data_local_dir().ok_or(HistoryError::DataDirectoryUnavailable)?;
+    let root = dirs::data_local_dir()
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("share")))
+        .ok_or(HistoryError::DataDirectoryUnavailable)?;
     Ok(root.join("Prune").join("history.sqlite3"))
 }
 
