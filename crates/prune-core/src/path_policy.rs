@@ -132,7 +132,8 @@ pub(crate) fn checked_metadata(path: &Path) -> io::Result<fs::Metadata> {
 pub(crate) fn canonical_candidate(path: &Path, root: &Path) -> io::Result<PathBuf> {
     checked_metadata(path)?;
     let canonical = fs::canonicalize(path)?;
-    if canonical == root || !canonical.starts_with(root) {
+    if canonical == root || (!canonical.starts_with(root) && !has_root_ancestor(&canonical, root)?)
+    {
         return Err(io::Error::other(
             "canonical candidate escapes the trusted root",
         ));
@@ -140,6 +141,18 @@ pub(crate) fn canonical_candidate(path: &Path, root: &Path) -> io::Result<PathBu
     checked_metadata(path)?;
     checked_metadata(&canonical)?;
     Ok(canonical)
+}
+
+/// Windows may spell the same directory with short (8.3) or long components.
+/// Fall back to file identity when lexical comparison cannot prove ancestry.
+fn has_root_ancestor(canonical: &Path, root: &Path) -> io::Result<bool> {
+    let root_identity = checked_identity(root)?;
+    for ancestor in canonical.ancestors().skip(1) {
+        if checked_identity(ancestor)? == root_identity {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Obtain an identity only for regular files/directories, never special files
